@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id             Int              @id @default(autoincrement())
+  spotifyUserId  String?          @unique
+  email          String?          @unique
+  displayName    String?
+  createdAt      DateTime         @default(now())
+  spotifyAccount SpotifyAccount?
+  plays          Play[]
+}
+
+model SpotifyAccount {
+  id             Int      @id @default(autoincrement())
+  user           User     @relation(fields: [userId], references: [id])
+  userId         Int      @unique
+
+  accessToken    String
+  refreshToken   String
+  tokenExpiresAt DateTime
+
+  // Cursor so we don't scan Play table every time
+  lastAfterMs    BigInt?  // unix ms timestamp used in "after="
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Play {
+  id           Int      @id @default(autoincrement())
+  user         User     @relation(fields: [userId], references: [id])
+  userId       Int
+
+  spotifyUri   String   // stable identifier (works even if id missing)
+  spotifyId    String?  // track id if provided
+
+  trackName    String
+  artistName   String
+  albumName    String?
+  playedAt     DateTime
+  durationMs   Int
+
+  source       String   @default("api")
+  createdAt    DateTime @default(now())
+
+  @@index([userId, playedAt])
+  @@unique([userId, playedAt, spotifyUri]) // prevents duplicates cleanly
+}
