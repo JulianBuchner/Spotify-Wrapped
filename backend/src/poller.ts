@@ -18,7 +18,7 @@ export async function pollAllUsersOnce() {
   }
 }
 
-async function pollOneAccount(accountId: number) {
+async function pollOneAccount(accountId: string) {
   const account = await prisma.spotifyAccount.findUnique({ where: { id: accountId } });
   if (!account) return;
 
