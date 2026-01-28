@@ -14,7 +14,7 @@ if (!clientId || !clientSecret || !redirectUri) {
   throw new Error("Missing SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET / SPOTIFY_REDIRECT_URI in .env");
 }
 
-const scope = "user-read-recently-played";
+const scope = "user-read-recently-played user-read-playback-state user-read-currently-playing";
 
 async function main() {
   const authUrl =

@@ -55,26 +55,41 @@ export async function ensureAccessToken(account: SpotifyAccount): Promise<string
   return updated.accessToken;
 }
 
-export async function fetchRecentlyPlayed(accessToken: string, afterMs?: bigint) {
-  const params: Record<string, any> = { limit: 50 };
-  if (afterMs) params.after = afterMs.toString();
+export type CurrentlyPlaying = {
+  timestampMs: number;
+  isPlaying: boolean;
+  progressMs: number | null;
+  type: string; // "track" | "episode" | "ad" | ...
+  item:
+    | {
+        id?: string | null;
+        uri: string;
+        name: string;
+        artists: { name: string }[];
+        album?: { name: string };
+        duration_ms: number;
+      }
+    | null;
+};
 
-  const res = await axios.get("https://api.spotify.com/v1/me/player/recently-played", {
+export async function fetchCurrentlyPlaying(accessToken: string): Promise<CurrentlyPlaying | null> {
+  const res = await axios.get("https://api.spotify.com/v1/me/player/currently-playing", {
     headers: { Authorization: `Bearer ${accessToken}` },
-    params,
+    // Prevent axios from throwing on 204; treat it as "nothing playing"
+    validateStatus: (s) => (s >= 200 && s < 300) || s === 204,
   });
 
-  return res.data.items as Array<{
-    played_at: string;
-    track: {
-      id?: string | null;
-      uri: string;
-      name: string;
-      artists: { name: string }[];
-      album?: { name: string };
-      duration_ms: number;
-    };
-  }>;
+  if (res.status === 204) return null;
+
+  const data = res.data as any;
+
+  return {
+    timestampMs: typeof data?.timestamp === "number" ? data.timestamp : Date.now(),
+    isPlaying: Boolean(data?.is_playing),
+    progressMs: typeof data?.progress_ms === "number" ? data.progress_ms : null,
+    type: typeof data?.currently_playing_type === "string" ? data.currently_playing_type : "unknown",
+    item: data?.item ?? null,
+  };
 }
 
 export async function fetchMe(accessToken: string) {

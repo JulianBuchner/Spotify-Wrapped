@@ -1,5 +1,11 @@
 import { prisma } from "./db";
-import { ensureAccessToken, fetchRecentlyPlayed } from "./spotify";
+import { ensureAccessToken, fetchCurrentlyPlaying } from "./spotify";
+
+// In-memory dedupe so we don't hit the DB every 15s for the same track
+const lastSeenByAccount = new Map<
+  string,
+  { uri: string; startMs: bigint; lastProgressMs: number | null; lastTimestampMs: number }
+>();
 
 export async function pollAllUsersOnce() {
   const accounts = await prisma.spotifyAccount.findMany();
@@ -24,54 +30,100 @@ async function pollOneAccount(accountId: string) {
 
   const accessToken = await ensureAccessToken(account);
 
-  const items = await fetchRecentlyPlayed(accessToken, account.lastAfterMs ?? undefined);
-  if (!items.length) {
-    console.log(`[poller] userId=${account.userId} no new plays`);
-    return;
-  }
+  const playing = await fetchCurrentlyPlaying(accessToken);
+  if (!playing) return;
 
-  // insert in chronological order
-  items.sort((a, b) => new Date(a.played_at).getTime() - new Date(b.played_at).getTime());
+  if (!playing.isPlaying) return;
+  if (playing.type !== "track") return;
+  if (!playing.item?.uri) return;
 
-  let inserted = 0;
-  let maxPlayedAtMs = account.lastAfterMs ?? BigInt(0);
+  const track = playing.item;
 
-  for (const item of items) {
-    const playedAt = new Date(item.played_at);
-    const playedAtMs = BigInt(playedAt.getTime());
-    if (playedAtMs > maxPlayedAtMs) maxPlayedAtMs = playedAtMs;
+  const progressMs = playing.progressMs ?? null;
+  const timestampMs = playing.timestampMs;
+  const startMs = BigInt(timestampMs - (progressMs ?? 0)); // estimated track start time (ms epoch)
 
-    const track = item.track;
-    const artistName = track.artists.map((a) => a.name).join(", ");
+  // If we're still on the same track, rely on progress to detect restarts and avoid
+  // duplicates caused by timestamp/progress jitter.
+  const prev = lastSeenByAccount.get(accountId);
+  if (prev && prev.uri === track.uri) {
+    if (progressMs === null) {
+      lastSeenByAccount.set(accountId, { ...prev, lastTimestampMs: timestampMs });
+      return;
+    }
 
-    // upsert-like behavior via unique constraint
-    try {
-      await prisma.play.create({
-        data: {
-          userId: account.userId,
-          spotifyUri: track.uri,
-          spotifyId: track.id ?? null,
-          trackName: track.name,
-          artistName,
-          albumName: track.album?.name ?? null,
-          playedAt,
-          durationMs: track.duration_ms,
-          source: "api",
-        },
+    const prevProgress = prev.lastProgressMs;
+    if (prevProgress !== null) {
+      const progressedForward = progressMs + 2000 >= prevProgress;
+      const looksLikeRestart = progressMs < 10_000 && prevProgress > 30_000;
+      if (progressedForward || !looksLikeRestart) {
+        lastSeenByAccount.set(accountId, {
+          ...prev,
+          lastProgressMs: progressMs,
+          lastTimestampMs: timestampMs,
+        });
+        return;
+      }
+    } else {
+      lastSeenByAccount.set(accountId, {
+        ...prev,
+        lastProgressMs: progressMs,
+        lastTimestampMs: timestampMs,
       });
-      inserted++;
-    } catch (e: any) {
-      // ignore unique constraint violations
-      // (Prisma error code for unique violation is P2002)
-      if (e?.code !== "P2002") throw e;
+      return;
     }
   }
 
-  // move cursor forward so next poll only fetches newer plays
-  await prisma.spotifyAccount.update({
-    where: { id: account.id },
-    data: { lastAfterMs: maxPlayedAtMs },
+  // Update in-memory "last seen" immediately (so we don't reprocess during DB work)
+  lastSeenByAccount.set(accountId, {
+    uri: track.uri,
+    startMs,
+    lastProgressMs: progressMs,
+    lastTimestampMs: timestampMs,
   });
 
-  console.log(`[poller] userId=${account.userId} inserted=${inserted} cursor=${maxPlayedAtMs.toString()}`);
+  // Prevent duplicates across restarts:
+  // check whether we already have this URI inserted around that start time (+/- 60s)
+  const window = 60_000n;
+  const startLower = new Date(Number(startMs - window));
+  const startUpper = new Date(Number(startMs + window));
+
+  const existing = await prisma.play.findFirst({
+    where: {
+      userId: account.userId,
+      spotifyUri: track.uri,
+      playedAt: { gte: startLower, lte: startUpper },
+    },
+    select: { id: true },
+  });
+
+  if (existing) return;
+
+  const artistName = track.artists.map((a) => a.name).join(", ");
+  const playedAt = new Date(Number(startMs));
+
+  await prisma.play.create({
+    data: {
+      userId: account.userId,
+      spotifyUri: track.uri,
+      spotifyId: track.id ?? null,
+      trackName: track.name,
+      artistName,
+      albumName: track.album?.name ?? null,
+      playedAt,
+      durationMs: track.duration_ms,
+      source: "api",
+    },
+  });
+
+  // Optional: reuse lastAfterMs as "last inserted start time" (not required, but harmless)
+  await prisma.spotifyAccount.update({
+    where: { id: account.id },
+    data: { lastAfterMs: startMs },
+  });
+
+  // Log only when something is inserted
+  console.log(
+    `[poller] userId=${account.userId} @ ${playedAt.toISOString()} inserted: "${track.name}" - ${artistName}`
+  );
 }

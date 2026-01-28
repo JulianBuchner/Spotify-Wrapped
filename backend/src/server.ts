@@ -9,6 +9,7 @@ dotenv.config();
 
 const PORT = Number(process.env.PORT ?? "3000");
 const POLL_MIN = Number(process.env.POLL_INTERVAL_MINUTES ?? "30");
+const POLL_SECONDS = Number(process.env.POLL_INTERVAL_SECONDS ?? "15");
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? "*";
 
 function buildPlayedAtFilter(query: Record<string, unknown>) {
@@ -149,7 +150,7 @@ async function main() {
   // poll on interval
   setInterval(() => {
     pollAllUsersOnce().catch((err) => app.log.error(err));
-  }, POLL_MIN * 60 * 1000);
+  }, POLL_SECONDS * 1000);
 }
 
 main().catch((err) => {
