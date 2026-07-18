@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { getHealth, getPlayCount, getArtistStats, getUniqueTracks, getListenTime } from "./api";
+import SearchTest from "./components/SearchTest.vue";
+import TopTest from "./components/TopTest.vue";
+import OverviewTest from "./components/OverviewTest.vue";
+import StatsTest from "./components/StatsTest.vue";
+import WrappedTest from "./components/WrappedTest.vue";
+import HistoryTest from "./components/HistoryTest.vue";
+import DetailTest from "./components/DetailTest.vue";
 
 type ArtistStats = {
   artist: string;
@@ -101,5 +108,13 @@ onMounted(async () => {
         <p>Artist listen time: {{ formatMs(artistStats.totalMs) }}</p>
       </div>
     </section>
+
+    <SearchTest />
+    <TopTest />
+    <OverviewTest />
+    <StatsTest />
+    <WrappedTest />
+    <HistoryTest />
+    <DetailTest />
   </main>
 </template>

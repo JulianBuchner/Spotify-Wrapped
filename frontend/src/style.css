@@ -77,3 +77,33 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* --- simple styling for the API test components --- */
+.test-section {
+  margin: 2rem auto 0;
+  max-width: 640px;
+  text-align: left;
+  border-top: 1px solid rgba(127, 127, 127, 0.3);
+  padding-top: 1rem;
+}
+.test-section form {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 460px;
+}
+.test-section .row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.test-output {
+  text-align: left;
+  background: rgba(127, 127, 127, 0.12);
+  padding: 0.5rem;
+  border-radius: 4px;
+  overflow: auto;
+  max-height: 320px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+}

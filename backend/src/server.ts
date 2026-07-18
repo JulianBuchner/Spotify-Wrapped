@@ -4,6 +4,13 @@ import dotenv from "dotenv";
 import { Prisma } from "@prisma/client";
 import { pollAllUsersOnce } from "./poller";
 import { prisma } from "./db";
+import { buildPlayedAtFilter } from "./lib/dateFilter";
+import searchRoutes from "./routes/search";
+import overviewRoutes from "./routes/overview";
+import statsRoutes from "./routes/stats";
+import wrappedRoutes from "./routes/wrapped";
+import historyRoutes from "./routes/history";
+import detailRoutes from "./routes/detail";
 
 dotenv.config();
 
@@ -12,46 +19,8 @@ const POLL_MIN = Number(process.env.POLL_INTERVAL_MINUTES ?? "30");
 const POLL_SECONDS = Number(process.env.POLL_INTERVAL_SECONDS ?? "15");
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? "*";
 
-function buildPlayedAtFilter(query: Record<string, unknown>) {
-  const fromRaw = query.from;
-  const toRaw = query.to;
-  let from: Date | undefined;
-  let to: Date | undefined;
-  const errors: string[] = [];
-
-  if (typeof fromRaw === "string" && fromRaw.trim() !== "") {
-    const parsed = new Date(fromRaw);
-    if (Number.isNaN(parsed.getTime())) errors.push("from");
-    else from = parsed;
-  } else if (fromRaw !== undefined) {
-    errors.push("from");
-  }
-
-  if (typeof toRaw === "string" && toRaw.trim() !== "") {
-    const parsed = new Date(toRaw);
-    if (Number.isNaN(parsed.getTime())) errors.push("to");
-    else to = parsed;
-  } else if (toRaw !== undefined) {
-    errors.push("to");
-  }
-
-  if (errors.length) {
-    return { error: `Invalid date for: ${errors.join(", ")}` };
-  }
-
-  if (!from && !to) return { filter: {}, from, to };
-
-  return {
-    filter: {
-      playedAt: {
-        ...(from ? { gte: from } : {}),
-        ...(to ? { lte: to } : {}),
-      },
-    },
-    from,
-    to,
-  };
-}
+// buildPlayedAtFilter now lives in ./lib/dateFilter
+// (extended with range presets + single-day support; existing callers unchanged).
 
 async function main() {
   const app = Fastify({ logger: true });
@@ -59,6 +28,14 @@ async function main() {
   await app.register(cors, {
     origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN,
   });
+
+  // New endpoint groups (see ENDPOINT-PLAN.md)
+  await app.register(searchRoutes);
+  await app.register(overviewRoutes);
+  await app.register(statsRoutes);
+  await app.register(wrappedRoutes);
+  await app.register(historyRoutes);
+  await app.register(detailRoutes);
 
   app.get("/health", async () => ({ status: "ok" }));
 

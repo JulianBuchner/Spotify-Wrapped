@@ -38,3 +38,23 @@ export async function getListenTime(from?: string, to?: string) {
   const res = await fetch(`${API}/api/stats/listen-time${qs}`);
   return res.json();
 }
+
+// --- Generic getter for the new endpoints (used by the test components) ---
+
+export type QueryValue = string | number | undefined;
+
+export async function apiGet(
+  path: string,
+  params: Record<string, QueryValue> = {}
+) {
+  const stringParams: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(params)) {
+    stringParams[key] = value === undefined ? undefined : String(value);
+  }
+  const res = await fetch(`${API}${path}${buildQuery(stringParams)}`);
+  try {
+    return await res.json();
+  } catch {
+    return { error: `HTTP ${res.status}` };
+  }
+}
