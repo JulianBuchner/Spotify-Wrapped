@@ -1,109 +1,214 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+/* ---------------------------------------------------------------------------
+   Design tokens — cyan/turquoise accent, light & dark mode.
+   Chart series colors are palette-validated:
+     light #0891b2, dark #0aa2c0
+--------------------------------------------------------------------------- */
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --bg-page: #f4f7f8;
+  --bg-surface: #ffffff;
+  --bg-surface-2: #eef3f4;
+  --bg-surface-3: #e3ebed;
+
+  --text-1: #101b1e;
+  --text-2: #51636a;
+  --text-3: #7d8d93;
+
+  --border: #e2e9eb;
+  --border-strong: #cdd6d9;
+  --grid: #eceff0;
+  --axis: #cdd6d9;
+
+  --accent: #0891b2;
+  --accent-strong: #0e7490;
+  --accent-text: #0e7490;
+  --accent-soft: rgba(8, 145, 178, 0.10);
+  --accent-softer: rgba(8, 145, 178, 0.06);
+
+  --series: #0891b2;
+  --series-soft: rgba(8, 145, 178, 0.10);
+  --series-dim: rgba(120, 130, 134, 0.30);
+
+  --good: #0ca30c;
+  --danger: #d03b3b;
+
+  --shadow-card: 0 1px 2px rgba(16, 27, 30, 0.05), 0 1px 1px rgba(16, 27, 30, 0.03);
+  --tooltip-bg: #101b1e;
+  --tooltip-text: #f0f5f6;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-page: #0e1214;
+  --bg-surface: #151a1d;
+  --bg-surface-2: #1c2327;
+  --bg-surface-3: #242d32;
+
+  --text-1: #eef4f5;
+  --text-2: #a3b3b9;
+  --text-3: #71828a;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --grid: #22292d;
+  --axis: #39444a;
+
+  --accent: #22c3e0;
+  --accent-strong: #3dd2ec;
+  --accent-text: #3dd2ec;
+  --accent-soft: rgba(34, 195, 224, 0.13);
+  --accent-softer: rgba(34, 195, 224, 0.07);
+
+  --series: #0aa2c0;
+  --series-soft: rgba(10, 162, 192, 0.16);
+  --series-dim: rgba(140, 150, 155, 0.28);
+
+  --good: #23c223;
+  --danger: #e66767;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --tooltip-bg: #06282e;
+  --tooltip-text: #e8f6f8;
 }
-a:hover {
-  color: #535bf2;
+
+/* ------------------------------- base ----------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-1);
+  background-color: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+#app {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
+h1, h2, h3, h4 {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+/* ------------------------------ controls -------------------------------- */
+
+button,
+input,
+select {
   font-family: inherit;
-  background-color: #1a1a1a;
+  font-size: 13px;
+  color: var(--text-1);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  font-weight: 500;
   cursor: pointer;
-  transition: border-color 0.25s;
+  transition: background-color 0.15s, border-color 0.15s;
 }
-button:hover {
-  border-color: #646cff;
+.btn:hover {
+  background: var(--bg-surface-2);
+  border-color: var(--border-strong);
 }
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #ffffff;
+  font-weight: 600;
+}
+:root[data-theme="dark"] .btn-primary {
+  color: #06282e;
+}
+.btn-primary:hover {
+  background: var(--accent-strong);
+  border-color: transparent;
+}
+
+.input,
+.select {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  transition: border-color 0.15s;
+}
+.input:hover,
+.select:hover {
+  border-color: var(--border-strong);
+}
+.input:focus,
+.select:focus,
+.input:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.input::placeholder {
+  color: var(--text-3);
+}
+
+/* -------------------------------- cards --------------------------------- */
 
 .card {
-  padding: 2em;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
 }
 
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
+/* ---------------------------- accessibility ------------------------------ */
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
-}
-
-/* --- simple styling for the API test components --- */
-.test-section {
-  margin: 2rem auto 0;
-  max-width: 640px;
-  text-align: left;
-  border-top: 1px solid rgba(127, 127, 127, 0.3);
-  padding-top: 1rem;
-}
-.test-section form {
-  display: grid;
-  gap: 0.5rem;
-  max-width: 460px;
-}
-.test-section .row {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.test-output {
-  text-align: left;
-  background: rgba(127, 127, 127, 0.12);
-  padding: 0.5rem;
-  border-radius: 4px;
-  overflow: auto;
-  max-height: 320px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 0.8rem;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

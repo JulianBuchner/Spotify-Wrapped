@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 import type { PlayPoint } from "../types";
+import { useTheme } from "../theme";
 
 const props = defineProps<{
   points: PlayPoint[];
   highlight?: string;
 }>();
+
+const { theme } = useTheme();
 
 const container = ref<HTMLDivElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -36,7 +39,17 @@ let rafId = 0;
 
 let dragging = false;
 let lastDragX = 0;
-let moved = false;
+
+/** Theme colors, read from the CSS custom properties at render time. */
+function themeColors() {
+  const style = getComputedStyle(document.documentElement);
+  return {
+    grid: style.getPropertyValue("--axis").trim() || "#888",
+    label: style.getPropertyValue("--text-3").trim() || "#888",
+    series: style.getPropertyValue("--series").trim() || "#0891b2",
+    dim: style.getPropertyValue("--series-dim").trim() || "rgba(120,120,120,0.3)",
+  };
+}
 
 function plotW() {
   return Math.max(1, cssW - M_LEFT - M_RIGHT);
@@ -46,13 +59,14 @@ function plotH() {
 }
 
 function computeDomain() {
-  if (!props.points.length) {
+  const first = props.points[0];
+  if (!first) {
     tMin = Date.now() - DAY_MS;
     tMax = Date.now();
     return;
   }
-  tMin = props.points[0].ts;
-  tMax = props.points[0].ts;
+  tMin = first.ts;
+  tMax = first.ts;
   for (const p of props.points) {
     if (p.ts < tMin) tMin = p.ts;
     if (p.ts > tMax) tMax = p.ts;
@@ -161,12 +175,13 @@ function matches(p: PlayPoint, q: string) {
 
 function render() {
   if (!ctx) return;
+  const colors = themeColors();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
   // axes
-  ctx.strokeStyle = "rgba(200, 220, 235, 0.18)";
-  ctx.fillStyle = "rgba(190, 205, 215, 0.75)";
+  ctx.strokeStyle = colors.grid;
+  ctx.fillStyle = colors.label;
   ctx.lineWidth = 1;
   ctx.font = "11px system-ui, sans-serif";
 
@@ -178,7 +193,7 @@ function render() {
     ctx.beginPath();
     ctx.moveTo(M_LEFT, y);
     ctx.lineTo(cssW - M_RIGHT, y);
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.45;
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.fillText(`${h}:00`, M_LEFT - 6, y);
@@ -193,7 +208,7 @@ function render() {
     ctx.beginPath();
     ctx.moveTo(t.x, M_TOP);
     ctx.lineTo(t.x, baseY);
-    ctx.globalAlpha = 0.25;
+    ctx.globalAlpha = 0.22;
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.fillText(t.label, t.x, baseY + 4);
@@ -207,7 +222,7 @@ function render() {
 
   // when highlighting: draw non-matches first (dim), matches on top (bright)
   if (q) {
-    ctx.fillStyle = "rgba(120, 120, 120, 0.28)";
+    ctx.fillStyle = colors.dim;
     for (const p of props.points) {
       const x = xToPx(p.ts);
       if (x < left || x > right) continue;
@@ -216,7 +231,8 @@ function render() {
       ctx.arc(x, yToPx(p.hour), r, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.fillStyle = "rgba(0, 187, 255, 0.95)";
+    ctx.fillStyle = colors.series;
+    ctx.globalAlpha = 0.95;
     for (const p of props.points) {
       const x = xToPx(p.ts);
       if (x < left || x > right) continue;
@@ -225,8 +241,10 @@ function render() {
       ctx.arc(x, yToPx(p.hour), r * 1.7, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
   } else {
-    ctx.fillStyle = "rgba(0, 187, 255, 0.6)";
+    ctx.fillStyle = colors.series;
+    ctx.globalAlpha = 0.62;
     for (const p of props.points) {
       const x = xToPx(p.ts);
       if (x < left || x > right) continue;
@@ -234,6 +252,7 @@ function render() {
       ctx.arc(x, yToPx(p.hour), r, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -264,7 +283,6 @@ function onMouseMove(e: MouseEvent) {
 
   if (dragging) {
     const dx = mx - lastDragX;
-    if (Math.abs(dx) > 1) moved = true;
     viewT0 -= dx / pxPerMs;
     lastDragX = mx;
     tooltip.value = null;
@@ -284,7 +302,6 @@ function onMouseMove(e: MouseEvent) {
 function onMouseDown(e: MouseEvent) {
   const rect = canvas.value!.getBoundingClientRect();
   dragging = true;
-  moved = false;
   lastDragX = e.clientX - rect.left;
   tooltip.value = null;
 }
@@ -362,6 +379,7 @@ watch(
   }
 );
 watch(() => props.highlight, scheduleRender);
+watch(theme, scheduleRender);
 </script>
 
 <template>
@@ -370,7 +388,7 @@ watch(() => props.highlight, scheduleRender);
     <div
       v-if="tooltip"
       class="cloud-tooltip"
-      :style="{ left: Math.min(tooltip.x + 12, 100000) + 'px', top: tooltip.y + 12 + 'px' }"
+      :style="{ left: tooltip.x + 12 + 'px', top: tooltip.y + 12 + 'px' }"
     >{{ tooltip.text }}</div>
   </div>
 </template>
@@ -379,10 +397,11 @@ watch(() => props.highlight, scheduleRender);
 .cloud-container {
   position: relative;
   width: 100%;
-  height: 60vh;
+  height: 100%;
   min-height: 340px;
-  background-color: #1f1f1f;
-  border-radius: 12px;
+  background-color: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 10px;
   overflow: hidden;
 }
 .cloud-canvas {
@@ -397,10 +416,10 @@ watch(() => props.highlight, scheduleRender);
 .cloud-tooltip {
   position: absolute;
   pointer-events: none;
-  background: rgba(0, 0, 0, 0.85);
-  color: #eee;
-  padding: 4px 8px;
-  border-radius: 6px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
+  padding: 5px 9px;
+  border-radius: 8px;
   font-size: 0.75rem;
   white-space: pre-line;
   max-width: 260px;
