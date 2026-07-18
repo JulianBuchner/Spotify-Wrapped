@@ -13,16 +13,24 @@ import {
   parseOrder,
   likeCondition,
   num,
+  playlistCondition,
 } from "../lib/query";
 
+/** Latest recorded name for the grouped playlist (playlists get renamed). */
+const LATEST_PLAYLIST_NAME = Prisma.sql`(
+  SELECT p2."playlistName" FROM "Play" p2
+  WHERE p2."contextUri" = "Play"."contextUri" AND p2."playlistName" IS NOT NULL
+  ORDER BY p2."playedAt" DESC LIMIT 1
+)`;
+
 const overviewRoutes: FastifyPluginAsync = async (app) => {
-  // Top songs / artists / albums, filtered by date, sortable by streams|playtime.
+  // Top songs / artists / albums / playlists, filtered by date, sortable by streams|playtime.
   app.get("/api/top/:entity", async (request, reply) => {
     const { entity } = request.params as { entity: string };
-    if (!["songs", "artists", "albums"].includes(entity)) {
+    if (!["songs", "artists", "albums", "playlists"].includes(entity)) {
       return reply
         .status(400)
-        .send({ error: "entity must be one of: songs, artists, albums" });
+        .send({ error: "entity must be one of: songs, artists, albums, playlists" });
     }
 
     const query = request.query as Record<string, unknown>;
@@ -36,12 +44,31 @@ const overviewRoutes: FastifyPluginAsync = async (app) => {
     const q = typeof query.q === "string" ? query.q.trim() : "";
 
     const groupCol =
-      entity === "songs" ? "spotifyUri" : entity === "artists" ? "artistName" : "albumName";
+      entity === "songs"
+        ? "spotifyUri"
+        : entity === "artists"
+          ? "artistName"
+          : entity === "albums"
+            ? "albumName"
+            : "contextUri";
     const searchCol =
-      entity === "artists" ? "artistName" : entity === "albums" ? "albumName" : "trackName";
+      entity === "artists"
+        ? "artistName"
+        : entity === "albums"
+          ? "albumName"
+          : entity === "playlists"
+            ? "playlistName"
+            : "trackName";
 
     const conditions = playedAtConditions(from, to);
     if (q) conditions.push(likeCondition(searchCol, q));
+    if (entity === "playlists") {
+      conditions.push(Prisma.sql`("contextType" = 'playlist' AND "contextUri" IS NOT NULL)`);
+    } else {
+      // Optional ?playlist= narrows songs/artists/albums to plays from that playlist.
+      const pl = playlistCondition(query);
+      if (pl) conditions.push(pl);
+    }
     const where = whereClause(conditions);
 
     const orderExpr =
@@ -84,7 +111,7 @@ const overviewRoutes: FastifyPluginAsync = async (app) => {
         streams: num(r.streams),
         playtimeMs: num(r.playtimeMs),
       }));
-    } else {
+    } else if (entity === "albums") {
       const rows = await prisma.$queryRaw<Array<any>>`
         SELECT "albumName" AS albumName, "artistName" AS artistName,
                COUNT(*) AS streams, SUM("durationMs") AS playtimeMs
@@ -98,9 +125,44 @@ const overviewRoutes: FastifyPluginAsync = async (app) => {
         streams: num(r.streams),
         playtimeMs: num(r.playtimeMs),
       }));
+    } else {
+      const rows = await prisma.$queryRaw<Array<any>>`
+        SELECT "contextUri" AS playlistUri, ${LATEST_PLAYLIST_NAME} AS playlistName,
+               COUNT(*) AS streams, SUM("durationMs") AS playtimeMs
+        FROM "Play" ${where}
+        GROUP BY "contextUri"
+        ORDER BY ${orderExpr} ${dir}
+        LIMIT ${limit} OFFSET ${offset}`;
+      data = rows.map((r) => ({
+        playlistUri: r.playlistUri,
+        playlistName: r.playlistName ?? null,
+        streams: num(r.streams),
+        playtimeMs: num(r.playtimeMs),
+      }));
     }
 
     return { data, meta: { total, limit, offset } };
+  });
+
+  // Distinct playlists seen in the play log (for filter dropdowns), most-played first.
+  app.get("/api/playlists", async (request) => {
+    const query = request.query as Record<string, unknown>;
+    const limit = parseLimit(query, 100, 500);
+    const rows = await prisma.$queryRaw<Array<any>>`
+      SELECT "contextUri" AS playlistUri, ${LATEST_PLAYLIST_NAME} AS playlistName,
+             COUNT(*) AS streams
+      FROM "Play"
+      WHERE "contextType" = 'playlist' AND "contextUri" IS NOT NULL
+      GROUP BY "contextUri"
+      ORDER BY streams DESC
+      LIMIT ${limit}`;
+    return {
+      data: rows.map((r) => ({
+        playlistUri: r.playlistUri,
+        playlistName: r.playlistName ?? null,
+        streams: num(r.streams),
+      })),
+    };
   });
 
   // Most recent plays, newest first.
@@ -116,6 +178,8 @@ const overviewRoutes: FastifyPluginAsync = async (app) => {
         trackName: true,
         artistName: true,
         albumName: true,
+        contextType: true,
+        playlistName: true,
       },
     });
     return { data };

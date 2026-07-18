@@ -5,10 +5,12 @@ import type {
   ForgottenTrack,
   Granularity,
   HistoryPointRow,
+  PlaylistInfo,
   RecentPlay,
   StatsSummary,
   TopAlbum,
   TopArtist,
+  TopPlaylist,
   TopSong,
 } from "./types";
 
@@ -36,66 +38,83 @@ async function apiGet<T>(path: string, params: Record<string, QueryValue> = {}):
   return body as T;
 }
 
-function windowParams(w: DateWindow): Record<string, QueryValue> {
-  return { range: w.range, from: w.from, to: w.to };
+/** `playlist` is a playlist contextUri; empty string / undefined means "all". */
+function windowParams(w: DateWindow, playlist?: string): Record<string, QueryValue> {
+  return { range: w.range, from: w.from, to: w.to, playlist };
 }
 
 export function getPlayCount() {
   return apiGet<{ count: number }>("/api/plays/count");
 }
 
-export function getSummary(w: DateWindow) {
-  return apiGet<{ data: StatsSummary }>("/api/stats/summary", windowParams(w));
+export function getSummary(w: DateWindow, playlist?: string) {
+  return apiGet<{ data: StatsSummary }>("/api/stats/summary", windowParams(w, playlist));
 }
 
-export function getStreamsOverTime(w: DateWindow, granularity: Granularity, metric: "streams" | "playtime") {
+export function getStreamsOverTime(
+  w: DateWindow,
+  granularity: Granularity,
+  metric: "streams" | "playtime",
+  playlist?: string
+) {
   return apiGet<{ data: BucketValue[] }>("/api/stats/streams-over-time", {
-    ...windowParams(w),
+    ...windowParams(w, playlist),
     granularity,
     metric,
   });
 }
 
-export function getListeningClock(w: DateWindow) {
+export function getListeningClock(w: DateWindow, playlist?: string) {
   return apiGet<{ data: Array<{ hour: number; value: number }> }>(
     "/api/stats/listening-clock",
-    windowParams(w)
+    windowParams(w, playlist)
   );
 }
 
-export function getListeningByWeekday(w: DateWindow) {
+export function getListeningByWeekday(w: DateWindow, playlist?: string) {
   return apiGet<{ data: Array<{ weekday: number; value: number }> }>(
     "/api/stats/listening-by-weekday",
-    windowParams(w)
+    windowParams(w, playlist)
   );
 }
 
-export function getDiscovery(w: DateWindow, granularity: Granularity) {
+export function getDiscovery(w: DateWindow, granularity: Granularity, playlist?: string) {
   return apiGet<{ data: DiscoveryPoint[] }>("/api/stats/discovery", {
-    ...windowParams(w),
+    ...windowParams(w, playlist),
     granularity,
   });
 }
 
-export function getTopSongs(w: DateWindow, limit = 10) {
+export function getTopSongs(w: DateWindow, limit = 10, playlist?: string) {
   return apiGet<{ data: TopSong[]; meta: { total: number } }>("/api/top/songs", {
-    ...windowParams(w),
+    ...windowParams(w, playlist),
     limit,
   });
 }
 
-export function getTopArtists(w: DateWindow, limit = 10) {
+export function getTopArtists(w: DateWindow, limit = 10, playlist?: string) {
   return apiGet<{ data: TopArtist[]; meta: { total: number } }>("/api/top/artists", {
+    ...windowParams(w, playlist),
+    limit,
+  });
+}
+
+export function getTopAlbums(w: DateWindow, limit = 10, playlist?: string) {
+  return apiGet<{ data: TopAlbum[]; meta: { total: number } }>("/api/top/albums", {
+    ...windowParams(w, playlist),
+    limit,
+  });
+}
+
+export function getTopPlaylists(w: DateWindow, limit = 10) {
+  return apiGet<{ data: TopPlaylist[]; meta: { total: number } }>("/api/top/playlists", {
     ...windowParams(w),
     limit,
   });
 }
 
-export function getTopAlbums(w: DateWindow, limit = 10) {
-  return apiGet<{ data: TopAlbum[]; meta: { total: number } }>("/api/top/albums", {
-    ...windowParams(w),
-    limit,
-  });
+export function getPlaylists() {
+  return apiGet<{ data: PlaylistInfo[] }>("/api/playlists");
 }
 
 export function getRecentlyPlayed(limit = 12) {
@@ -106,9 +125,9 @@ export function getForgotten(limit = 10) {
   return apiGet<{ data: ForgottenTrack[] }>("/api/forgotten", { limit });
 }
 
-export function getHistoryPoints(w: DateWindow) {
+export function getHistoryPoints(w: DateWindow, playlist?: string) {
   return apiGet<{ data: HistoryPointRow[]; meta: { total: number } }>(
     "/api/history/points",
-    windowParams(w)
+    windowParams(w, playlist)
   );
 }

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { getTopAlbums, getTopArtists, getTopSongs } from "../api";
+import { getTopAlbums, getTopArtists, getTopPlaylists, getTopSongs } from "../api";
 import { formatMs, formatNumber } from "../lib/format";
 import type { DateWindow } from "../types";
 import ChartCard from "./ChartCard.vue";
 
-const props = defineProps<{ window: DateWindow }>();
+const props = defineProps<{ window: DateWindow; playlist?: string }>();
 
-type Entity = "songs" | "artists" | "albums";
+type Entity = "songs" | "artists" | "albums" | "playlists";
 
 interface Row {
   key: string;
@@ -26,6 +26,7 @@ const TABS: Array<{ value: Entity; label: string }> = [
   { value: "songs", label: "Songs" },
   { value: "artists", label: "Artists" },
   { value: "albums", label: "Albums" },
+  { value: "playlists", label: "Playlists" },
 ];
 
 async function load() {
@@ -33,7 +34,7 @@ async function load() {
   error.value = null;
   try {
     if (entity.value === "songs") {
-      const res = await getTopSongs(props.window);
+      const res = await getTopSongs(props.window, 10, props.playlist);
       rows.value = res.data.map((s) => ({
         key: s.spotifyUri,
         primary: s.trackName,
@@ -42,7 +43,7 @@ async function load() {
         playtimeMs: s.playtimeMs,
       }));
     } else if (entity.value === "artists") {
-      const res = await getTopArtists(props.window);
+      const res = await getTopArtists(props.window, 10, props.playlist);
       rows.value = res.data.map((a) => ({
         key: a.artistName,
         primary: a.artistName,
@@ -50,14 +51,23 @@ async function load() {
         streams: a.streams,
         playtimeMs: a.playtimeMs,
       }));
-    } else {
-      const res = await getTopAlbums(props.window);
+    } else if (entity.value === "albums") {
+      const res = await getTopAlbums(props.window, 10, props.playlist);
       rows.value = res.data.map((a) => ({
         key: a.albumName,
         primary: a.albumName,
         secondary: a.artistName,
         streams: a.streams,
         playtimeMs: a.playtimeMs,
+      }));
+    } else {
+      const res = await getTopPlaylists(props.window);
+      rows.value = res.data.map((p) => ({
+        key: p.playlistUri,
+        primary: p.playlistName ?? "Unknown playlist",
+        secondary: "",
+        streams: p.streams,
+        playtimeMs: p.playtimeMs,
       }));
     }
   } catch (e) {
@@ -67,7 +77,7 @@ async function load() {
   }
 }
 
-watch([() => props.window, entity], load, { immediate: true, deep: true });
+watch([() => props.window, () => props.playlist, entity], load, { immediate: true, deep: true });
 
 const maxStreams = computed(() => Math.max(1, ...rows.value.map((r) => r.streams)));
 </script>
@@ -106,7 +116,13 @@ const maxStreams = computed(() => Math.max(1, ...rows.value.map((r) => r.streams
           <span class="playtime">{{ formatMs(r.playtimeMs) }}</span>
         </span>
       </li>
-      <li v-if="!rows.length && !loading" class="empty">No plays in this range.</li>
+      <li v-if="!rows.length && !loading" class="empty">
+        {{
+          entity === "playlists"
+            ? "No playlist plays recorded yet — tracking starts with new plays."
+            : "No plays in this range."
+        }}
+      </li>
     </ol>
   </ChartCard>
 </template>

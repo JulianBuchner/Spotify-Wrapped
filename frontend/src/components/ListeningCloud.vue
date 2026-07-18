@@ -293,7 +293,8 @@ function onMouseMove(e: MouseEvent) {
   const near = findNearest(mx, my);
   if (near) {
     const when = new Date(near.ts).toLocaleString();
-    tooltip.value = { x: mx, y: my, text: `${when}\n${near.artist} — ${near.track}` };
+    const playlistLine = near.playlist ? `\nfrom ${near.playlist}` : "";
+    tooltip.value = { x: mx, y: my, text: `${when}\n${near.artist} — ${near.track}${playlistLine}` };
   } else {
     tooltip.value = null;
   }

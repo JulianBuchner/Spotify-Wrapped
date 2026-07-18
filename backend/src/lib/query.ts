@@ -28,5 +28,16 @@ export function likeCondition(column: string, q: string): Prisma.Sql {
   return Prisma.sql`LOWER(${Prisma.raw(`"${column}"`)}) LIKE '%' || LOWER(${q}) || '%'`;
 }
 
+/**
+ * Optional ?playlist=<contextUri> filter (e.g. "spotify:playlist:3cEY...").
+ * Filters by contextUri rather than name: URIs are stable across renames and
+ * unique, while names can collide. Returns null when the param is absent.
+ */
+export function playlistCondition(query: Record<string, unknown>): Prisma.Sql | null {
+  const playlist = typeof query.playlist === "string" ? query.playlist.trim() : "";
+  if (!playlist) return null;
+  return Prisma.sql`("contextType" = 'playlist' AND "contextUri" = ${playlist})`;
+}
+
 /** SQLite COUNT/SUM come back as number | bigint; normalize to number. */
 export const num = (v: number | bigint | null | undefined): number => Number(v ?? 0);

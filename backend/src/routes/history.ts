@@ -6,7 +6,7 @@ import {
   playedAtConditions,
   whereClause,
 } from "../lib/dateFilter";
-import { parseLimit, parseOffset, likeCondition, num } from "../lib/query";
+import { parseLimit, parseOffset, likeCondition, num, playlistCondition } from "../lib/query";
 
 const historyRoutes: FastifyPluginAsync = async (app) => {
   // Paginated raw play log, newest first, searchable across track/artist/album.
@@ -59,11 +59,15 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
     const query = request.query as Record<string, unknown>;
     const { from, to, error } = buildPlayedAtFilter(query);
     if (error) return reply.status(400).send({ error });
-    const where = whereClause(playedAtConditions(from, to));
+    const conditions = playedAtConditions(from, to);
+    const pl = playlistCondition(query);
+    if (pl) conditions.push(pl);
+    const where = whereClause(conditions);
 
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT "playedAt" AS playedAt, "trackName" AS trackName,
-             "artistName" AS artistName, "durationMs" AS durationMs
+             "artistName" AS artistName, "durationMs" AS durationMs,
+             "playlistName" AS playlistName
       FROM "Play" ${where}
       ORDER BY "playedAt" ASC
       LIMIT 100000`;
@@ -74,6 +78,7 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
         trackName: r.trackName,
         artistName: r.artistName,
         durationMs: num(r.durationMs),
+        playlistName: r.playlistName ?? null,
       })),
       meta: { total: rows.length },
     };

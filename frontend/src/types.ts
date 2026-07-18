@@ -4,6 +4,7 @@ export interface PlayPoint {
   artist: string;
   track: string;
   ms: number; // durationMs
+  playlist: string | null; // playlist name when the play came from one
 }
 
 export interface StatsSummary {
@@ -37,12 +38,27 @@ export interface TopAlbum {
   playtimeMs: number;
 }
 
+export interface TopPlaylist {
+  playlistUri: string;
+  playlistName: string | null;
+  streams: number;
+  playtimeMs: number;
+}
+
+export interface PlaylistInfo {
+  playlistUri: string;
+  playlistName: string | null;
+  streams: number;
+}
+
 export interface RecentPlay {
   playedAt: string;
   spotifyUri: string;
   trackName: string;
   artistName: string;
   albumName: string;
+  contextType: string | null;
+  playlistName: string | null;
 }
 
 export interface ForgottenTrack {
@@ -71,6 +87,7 @@ export interface HistoryPointRow {
   trackName: string;
   artistName: string;
   durationMs: number;
+  playlistName: string | null;
 }
 
 /** Date filter values shared by dashboard + cloud (maps 1:1 to query params). */

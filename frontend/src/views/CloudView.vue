@@ -3,11 +3,13 @@ import { ref, onMounted, watch } from "vue";
 import { getHistoryPoints } from "../api";
 import DateRangeFilter from "../components/DateRangeFilter.vue";
 import ListeningCloud from "../components/ListeningCloud.vue";
+import PlaylistFilter from "../components/PlaylistFilter.vue";
 import { formatNumber } from "../lib/format";
 import type { DateWindow, PlayPoint } from "../types";
 
 const window_ = ref<DateWindow>({ range: "all_time", from: "", to: "" });
 const highlight = ref("");
+const playlist = ref(""); // contextUri; "" = all — note: only new plays carry context
 
 const points = ref<PlayPoint[]>([]);
 const loading = ref(false);
@@ -19,12 +21,19 @@ async function load() {
   loading.value = true;
   errorMsg.value = null;
   try {
-    const res = await getHistoryPoints(window_.value);
+    const res = await getHistoryPoints(window_.value, playlist.value);
     points.value = res.data.map((r) => {
       const ts = new Date(r.playedAt).getTime();
       const d = new Date(ts);
       const hour = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
-      return { ts, hour, artist: r.artistName, track: r.trackName, ms: r.durationMs };
+      return {
+        ts,
+        hour,
+        artist: r.artistName,
+        track: r.trackName,
+        ms: r.durationMs,
+        playlist: r.playlistName,
+      };
     });
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : "Failed to load points.";
@@ -35,13 +44,16 @@ async function load() {
 }
 
 onMounted(load);
-watch(window_, load, { deep: true });
+watch([window_, playlist], load, { deep: true });
 </script>
 
 <template>
   <div class="cloud-page">
     <div class="cloud-toolbar">
-      <DateRangeFilter v-model="window_" />
+      <div class="toolbar-left">
+        <DateRangeFilter v-model="window_" />
+        <PlaylistFilter v-model="playlist" />
+      </div>
       <div class="toolbar-right">
         <input
           v-model="highlight"
@@ -92,6 +104,12 @@ watch(window_, load, { deep: true });
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
 }

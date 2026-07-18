@@ -6,7 +6,7 @@ import {
   playedAtConditions,
   whereClause,
 } from "../lib/dateFilter";
-import { num } from "../lib/query";
+import { num, playlistCondition } from "../lib/query";
 
 const GRANULARITY_FORMAT: Record<string, string> = {
   day: "%Y-%m-%d",
@@ -20,13 +20,21 @@ function pickGranularity(query: Record<string, unknown>, def = "month"): string 
   return GRANULARITY_FORMAT[g] ? g : def;
 }
 
+/** Date window + optional ?playlist= filter, shared by the stats endpoints. */
+function scopedWhere(query: Record<string, unknown>, from?: Date, to?: Date) {
+  const conditions = playedAtConditions(from, to);
+  const pl = playlistCondition(query);
+  if (pl) conditions.push(pl);
+  return whereClause(conditions);
+}
+
 const statsRoutes: FastifyPluginAsync = async (app) => {
   // Headline numbers (supersedes /api/stats/unique-tracks + /api/stats/listen-time).
   app.get("/api/stats/summary", async (request, reply) => {
     const query = request.query as Record<string, unknown>;
     const { from, to, error } = buildPlayedAtFilter(query);
     if (error) return reply.status(400).send({ error });
-    const where = whereClause(playedAtConditions(from, to));
+    const where = scopedWhere(query, from, to);
 
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT COUNT(*) AS totalStreams,
@@ -64,7 +72,7 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
     const query = request.query as Record<string, unknown>;
     const { from, to, error } = buildPlayedAtFilter(query);
     if (error) return reply.status(400).send({ error });
-    const where = whereClause(playedAtConditions(from, to));
+    const where = scopedWhere(query, from, to);
 
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT CAST(strftime('%H', "playedAt", 'localtime') AS INTEGER) AS hour, COUNT(*) AS value
@@ -79,7 +87,7 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
     const query = request.query as Record<string, unknown>;
     const { from, to, error } = buildPlayedAtFilter(query);
     if (error) return reply.status(400).send({ error });
-    const where = whereClause(playedAtConditions(from, to));
+    const where = scopedWhere(query, from, to);
 
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT CAST(strftime('%w', "playedAt", 'localtime') AS INTEGER) AS weekday, COUNT(*) AS value
@@ -94,7 +102,7 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
     const query = request.query as Record<string, unknown>;
     const { from, to, error } = buildPlayedAtFilter(query);
     if (error) return reply.status(400).send({ error });
-    const where = whereClause(playedAtConditions(from, to));
+    const where = scopedWhere(query, from, to);
     const fmt = GRANULARITY_FORMAT[pickGranularity(query)];
     const metricExpr =
       query.metric === "playtime" ? Prisma.sql`SUM("durationMs")` : Prisma.sql`COUNT(*)`;
@@ -117,9 +125,13 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
     if (to) conditions.push(Prisma.sql`firstPlay <= ${to}`);
     const outerWhere = whereClause(conditions);
 
+    // With ?playlist= the curve becomes "first time heard in that playlist".
+    const pl = playlistCondition(query);
+    const innerWhere = whereClause(pl ? [pl] : []);
+
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT strftime(${fmt}, firstPlay) AS bucket, COUNT(*) AS newCount
-      FROM (SELECT "spotifyUri", MIN("playedAt") AS firstPlay FROM "Play" GROUP BY "spotifyUri")
+      FROM (SELECT "spotifyUri", MIN("playedAt") AS firstPlay FROM "Play" ${innerWhere} GROUP BY "spotifyUri")
       ${outerWhere}
       GROUP BY bucket ORDER BY bucket`;
 
@@ -142,14 +154,19 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
     const conditions: Prisma.Sql[] = [];
     if (from) conditions.push(Prisma.sql`p."playedAt" >= ${from}`);
     if (to) conditions.push(Prisma.sql`p."playedAt" <= ${to}`);
+    const pl = playlistCondition(query);
+    if (pl) conditions.push(pl);
     const where = whereClause(conditions);
+
+    // Scope the first-play lookup the same way so "new" means new within the filter.
+    const innerWhere = whereClause(pl ? [pl] : []);
 
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT strftime(${fmt}, p."playedAt") AS bucket,
              COUNT(*) AS total,
              SUM(CASE WHEN p."playedAt" = f.fp THEN 1 ELSE 0 END) AS newStreams
       FROM "Play" p
-      JOIN (SELECT "spotifyUri", MIN("playedAt") AS fp FROM "Play" GROUP BY "spotifyUri") f
+      JOIN (SELECT "spotifyUri", MIN("playedAt") AS fp FROM "Play" ${innerWhere} GROUP BY "spotifyUri") f
         ON f."spotifyUri" = p."spotifyUri"
       ${where}
       GROUP BY bucket ORDER BY bucket`;
@@ -173,7 +190,7 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
     const query = request.query as Record<string, unknown>;
     const { from, to, error } = buildPlayedAtFilter(query);
     if (error) return reply.status(400).send({ error });
-    const where = whereClause(playedAtConditions(from, to));
+    const where = scopedWhere(query, from, to);
 
     const bucketSizeRaw = Number(query.bucketSize);
     const bucketSize =

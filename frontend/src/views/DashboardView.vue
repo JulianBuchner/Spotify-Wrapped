@@ -11,6 +11,7 @@ import ChartCard from "../components/ChartCard.vue";
 import ColumnChart, { type ColumnPoint } from "../components/ColumnChart.vue";
 import DateRangeFilter from "../components/DateRangeFilter.vue";
 import ForgottenList from "../components/ForgottenList.vue";
+import PlaylistFilter from "../components/PlaylistFilter.vue";
 import RecentlyPlayed from "../components/RecentlyPlayed.vue";
 import StatCard from "../components/StatCard.vue";
 import TimeSeriesChart, { type SeriesPoint } from "../components/TimeSeriesChart.vue";
@@ -25,6 +26,11 @@ import {
 import type { DateWindow, Granularity, StatsSummary } from "../types";
 
 const window_ = ref<DateWindow>({ range: "all_time", from: "", to: "" });
+
+// Playlist contextUri filter; "" = all. Scopes every chart and list below the
+// filter row. Only plays recorded since playlist tracking went live carry
+// context, so older plays disappear from view while this filter is active.
+const playlist = ref("");
 
 /** Bucket size for the time charts, derived from the active window. */
 const granularity = computed<Granularity>(() => {
@@ -82,7 +88,7 @@ const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday first
 async function loadSummary() {
   summaryLoading.value = true;
   try {
-    summary.value = (await getSummary(window_.value)).data;
+    summary.value = (await getSummary(window_.value, playlist.value)).data;
   } catch {
     summary.value = null;
   } finally {
@@ -94,7 +100,12 @@ async function loadStreams() {
   streamsLoading.value = true;
   streamsError.value = null;
   try {
-    const res = await getStreamsOverTime(window_.value, granularity.value, metric.value);
+    const res = await getStreamsOverTime(
+      window_.value,
+      granularity.value,
+      metric.value,
+      playlist.value
+    );
     streamsSeries.value = res.data.map((d) => ({
       label: formatBucket(d.bucket, granularity.value),
       // playtime arrives as ms — plot hours so the axis stays readable
@@ -111,7 +122,7 @@ async function loadClock() {
   clockLoading.value = true;
   clockError.value = null;
   try {
-    const res = await getListeningClock(window_.value);
+    const res = await getListeningClock(window_.value, playlist.value);
     clockData.value = res.data.map((d) => ({
       label: `${d.hour}`,
       tooltipLabel: `${String(d.hour).padStart(2, "0")}:00–${String(d.hour).padStart(2, "0")}:59`,
@@ -128,7 +139,7 @@ async function loadWeekday() {
   weekdayLoading.value = true;
   weekdayError.value = null;
   try {
-    const res = await getListeningByWeekday(window_.value);
+    const res = await getListeningByWeekday(window_.value, playlist.value);
     const byDay = new Map(res.data.map((d) => [d.weekday, d.value]));
     weekdayData.value = WEEKDAY_ORDER.map((d) => ({
       label: WEEKDAYS[d] ?? "",
@@ -145,7 +156,7 @@ async function loadDiscovery() {
   discoveryLoading.value = true;
   discoveryError.value = null;
   try {
-    const res = await getDiscovery(window_.value, granularity.value);
+    const res = await getDiscovery(window_.value, granularity.value, playlist.value);
     discoverySeries.value = res.data.map((d) => ({
       label: formatBucket(d.bucket, granularity.value),
       value: d.cumulative,
@@ -165,7 +176,7 @@ function loadAll() {
   loadDiscovery();
 }
 
-watch(window_, loadAll, { immediate: true, deep: true });
+watch([window_, playlist], loadAll, { immediate: true, deep: true });
 watch(metric, loadStreams);
 
 const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
@@ -175,6 +186,7 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
   <div class="dashboard">
     <div class="filter-row">
       <DateRangeFilter v-model="window_" />
+      <PlaylistFilter v-model="playlist" />
     </div>
 
     <div class="kpi-row">
@@ -279,7 +291,7 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
       </div>
 
       <div class="span-7">
-        <TopList :window="window_" />
+        <TopList :window="window_" :playlist="playlist" />
       </div>
       <div class="span-5">
         <RecentlyPlayed />
@@ -312,6 +324,8 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
 .filter-row {
   display: flex;
   align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .kpi-row {

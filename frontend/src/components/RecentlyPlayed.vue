@@ -45,7 +45,12 @@ onBeforeUnmount(() => window.clearInterval(timer));
             {{ r.artistName }} · {{ r.albumName }}
           </span>
         </span>
-        <span class="ago">{{ formatAgo(r.playedAt) }}</span>
+        <span class="right">
+          <span v-if="r.playlistName" class="playlist-chip" :title="`Played from ${r.playlistName}`">
+            {{ r.playlistName }}
+          </span>
+          <span class="ago">{{ formatAgo(r.playedAt) }}</span>
+        </span>
       </li>
       <li v-if="!rows.length && !loading" class="empty">No plays yet.</li>
     </ul>
@@ -87,6 +92,26 @@ onBeforeUnmount(() => window.clearInterval(timer));
 .meta {
   font-size: 12px;
   color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.playlist-chip {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-text);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-soft);
+  padding: 1px 8px;
+  border-radius: 999px;
+  max-width: 140px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
