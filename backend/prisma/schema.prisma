@@ -49,6 +49,14 @@ model Play {
   playedAt     DateTime
   durationMs   Int
 
+  // Playback context from the currently-playing endpoint (null when Spotify
+  // sends no context, e.g. autoplay/radio). playlistName is resolved via
+  // GET /playlists/{id} and stays null for non-playlist contexts or when the
+  // playlist is not readable (private without scope, Spotify-owned algorithmic).
+  contextType  String?  // "playlist" | "album" | "artist" | "show"
+  contextUri   String?  // e.g. "spotify:playlist:3cEYpjA9oz9GiPac4AsH4n"
+  playlistName String?
+
   source       String   @default("api")
   createdAt    DateTime @default(now())
 

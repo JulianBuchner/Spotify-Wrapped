@@ -1,11 +1,49 @@
 import { prisma } from "./db";
-import { ensureAccessToken, fetchCurrentlyPlaying } from "./spotify";
+import {
+  ensureAccessToken,
+  fetchCurrentlyPlaying,
+  fetchPlaylistName,
+  type PlayingContext,
+} from "./spotify";
 
 // In-memory dedupe so we don't hit the DB every 15s for the same track
 const lastSeenByAccount = new Map<
   string,
   { uri: string; startMs: bigint; lastProgressMs: number | null; lastTimestampMs: number }
 >();
+
+// Playlist-name cache so we don't call /playlists/{id} on every insert.
+// Successful lookups live long (renames are rare); failed ones retry sooner.
+const NAME_TTL_MS = 24 * 60 * 60 * 1000;
+const NAME_NEGATIVE_TTL_MS = 60 * 60 * 1000;
+const playlistNameCache = new Map<string, { name: string | null; fetchedAt: number }>();
+
+/** "spotify:playlist:3cEYpjA9oz9GiPac4AsH4n" -> "3cEYpjA9oz9GiPac4AsH4n" */
+function playlistIdFromUri(uri: string): string | null {
+  const parts = uri.split(":");
+  return parts[0] === "spotify" && parts[1] === "playlist" && parts[2] ? parts[2] : null;
+}
+
+async function resolvePlaylistName(accessToken: string, uri: string): Promise<string | null> {
+  const id = playlistIdFromUri(uri);
+  if (!id) return null;
+
+  const cached = playlistNameCache.get(id);
+  if (cached) {
+    const ttl = cached.name === null ? NAME_NEGATIVE_TTL_MS : NAME_TTL_MS;
+    if (Date.now() - cached.fetchedAt < ttl) return cached.name;
+  }
+
+  try {
+    const name = await fetchPlaylistName(accessToken, id);
+    playlistNameCache.set(id, { name, fetchedAt: Date.now() });
+    return name;
+  } catch (err) {
+    // Network/5xx errors: don't fail the play insert over a display name.
+    console.error(`[poller] Failed to resolve playlist name for ${uri}`, err);
+    return cached?.name ?? null;
+  }
+}
 
 export async function pollAllUsersOnce() {
   const accounts = await prisma.spotifyAccount.findMany();
@@ -102,6 +140,10 @@ async function pollOneAccount(accountId: string) {
   const artistName = track.artists.map((a) => a.name).join(", ");
   const playedAt = new Date(Number(startMs));
 
+  const context: PlayingContext | null = playing.context;
+  const playlistName =
+    context?.type === "playlist" ? await resolvePlaylistName(accessToken, context.uri) : null;
+
   await prisma.play.create({
     data: {
       userId: account.userId,
@@ -112,6 +154,9 @@ async function pollOneAccount(accountId: string) {
       albumName: track.album?.name ?? null,
       playedAt,
       durationMs: track.duration_ms,
+      contextType: context?.type ?? null,
+      contextUri: context?.uri ?? null,
+      playlistName,
       source: "api",
     },
   });
@@ -123,7 +168,8 @@ async function pollOneAccount(accountId: string) {
   });
 
   // Log only when something is inserted
+  const fromInfo = context ? ` [${context.type}${playlistName ? `: ${playlistName}` : ""}]` : "";
   console.log(
-    `[poller] userId=${account.userId} @ ${playedAt.toISOString()} inserted: "${track.name}" - ${artistName}`
+    `[poller] userId=${account.userId} @ ${playedAt.toISOString()} inserted: "${track.name}" - ${artistName}${fromInfo}`
   );
 }

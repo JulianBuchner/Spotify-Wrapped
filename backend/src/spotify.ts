@@ -55,11 +55,18 @@ export async function ensureAccessToken(account: SpotifyAccount): Promise<string
   return updated.accessToken;
 }
 
+export type PlayingContext = {
+  type: string; // "playlist" | "album" | "artist" | "show"
+  href: string | null;
+  uri: string; // e.g. "spotify:playlist:3cEYpjA9oz9GiPac4AsH4n"
+};
+
 export type CurrentlyPlaying = {
   timestampMs: number;
   isPlaying: boolean;
   progressMs: number | null;
   type: string; // "track" | "episode" | "ad" | ...
+  context: PlayingContext | null;
   item:
     | {
         id?: string | null;
@@ -83,13 +90,49 @@ export async function fetchCurrentlyPlaying(accessToken: string): Promise<Curren
 
   const data = res.data as any;
 
+  const rawContext = data?.context;
+  const context: PlayingContext | null =
+    rawContext && typeof rawContext.uri === "string" && typeof rawContext.type === "string"
+      ? {
+          type: rawContext.type,
+          href: typeof rawContext.href === "string" ? rawContext.href : null,
+          uri: rawContext.uri,
+        }
+      : null;
+
   return {
     timestampMs: typeof data?.timestamp === "number" ? data.timestamp : Date.now(),
     isPlaying: Boolean(data?.is_playing),
     progressMs: typeof data?.progress_ms === "number" ? data.progress_ms : null,
     type: typeof data?.currently_playing_type === "string" ? data.currently_playing_type : "unknown",
+    context,
     item: data?.item ?? null,
   };
+}
+
+/**
+ * Resolve a playlist's display name via GET /playlists/{id}?fields=name.
+ * Returns null when the playlist is not readable: 404 for deleted playlists
+ * and for Spotify-owned algorithmic/editorial playlists (dev-mode apps),
+ * 403 for playlists the token may not read (e.g. private without the
+ * playlist-read-private scope).
+ */
+export async function fetchPlaylistName(
+  accessToken: string,
+  playlistId: string
+): Promise<string | null> {
+  const res = await axios.get(
+    `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { fields: "name" },
+      validateStatus: (s) => (s >= 200 && s < 300) || s === 403 || s === 404,
+    }
+  );
+
+  if (res.status === 403 || res.status === 404) return null;
+  const name = (res.data as any)?.name;
+  return typeof name === "string" && name.length > 0 ? name : null;
 }
 
 export async function fetchMe(accessToken: string) {

@@ -14,7 +14,7 @@ if (!clientId || !clientSecret || !redirectUri) {
   throw new Error("Missing SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET / SPOTIFY_REDIRECT_URI in .env");
 }
 
-const scope = "user-read-recently-played user-read-playback-state user-read-currently-playing";
+const scope = "user-read-recently-played user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative";
 
 async function main() {
   const authUrl =
@@ -97,3 +97,4 @@ main().catch(async (err) => {
   await prisma.$disconnect();
   process.exit(1);
 });
+
