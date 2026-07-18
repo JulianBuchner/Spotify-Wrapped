@@ -52,6 +52,32 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
       meta: { total: num(totalRows[0]?.total), limit, offset },
     };
   });
+
+  // Lightweight feed for the interactive scatter ("listening cloud"):
+  // all plays in the range, ascending, minimal fields.
+  app.get("/api/history/points", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const { from, to, error } = buildPlayedAtFilter(query);
+    if (error) return reply.status(400).send({ error });
+    const where = whereClause(playedAtConditions(from, to));
+
+    const rows = await prisma.$queryRaw<Array<any>>`
+      SELECT "playedAt" AS playedAt, "trackName" AS trackName,
+             "artistName" AS artistName, "durationMs" AS durationMs
+      FROM "Play" ${where}
+      ORDER BY "playedAt" ASC
+      LIMIT 100000`;
+
+    return {
+      data: rows.map((r) => ({
+        playedAt: r.playedAt,
+        trackName: r.trackName,
+        artistName: r.artistName,
+        durationMs: num(r.durationMs),
+      })),
+      meta: { total: rows.length },
+    };
+  });
 };
 
 export default historyRoutes;

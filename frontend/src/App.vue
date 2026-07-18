@@ -8,6 +8,7 @@ import StatsTest from "./components/StatsTest.vue";
 import WrappedTest from "./components/WrappedTest.vue";
 import HistoryTest from "./components/HistoryTest.vue";
 import DetailTest from "./components/DetailTest.vue";
+import HistoryCloud from "./components/HistoryCloud.vue";
 
 type ArtistStats = {
   artist: string;
@@ -78,6 +79,8 @@ onMounted(async () => {
     <h1>Anytime Wrapped</h1>
     <p>Backend: {{ status }}</p>
     <p v-if="count !== null">Plays stored: {{ count }}</p>
+
+    <HistoryCloud />
 
     <section style="margin-top: 2rem">
       <h2>Stats</h2>
