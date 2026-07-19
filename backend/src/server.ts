@@ -44,7 +44,8 @@ async function main() {
   // ---------------------------------------------------------------------
   const CACHE_TTL_MS = 60_000;
   const CACHE_MAX_ENTRIES = 200;
-  const CACHEABLE = /^\/api\/(stats\/|top\/|history\/points|playlists|forgotten|wrapped\/)/;
+  // history/points manages its own cache (pre-gzipped payloads) in its route
+  const CACHEABLE = /^\/api\/(stats\/|top\/|playlists|forgotten|wrapped\/)/;
   const responseCache = new Map<string, { body: string; at: number }>();
 
   app.addHook("onRequest", async (request, reply) => {
