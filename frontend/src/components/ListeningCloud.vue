@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import type { PlayPoint } from "../types";
 import { useTheme } from "../theme";
 
@@ -15,6 +15,8 @@ const canvas = ref<HTMLCanvasElement | null>(null);
 const tooltip = ref<{ x: number; y: number; text: string } | null>(null);
 
 const DAY_MS = 86_400_000;
+const TWO_PI = Math.PI * 2;
+const CHUNK = 4000; // dots per fill() — bounds path complexity
 
 // layout (css pixels)
 const M_LEFT = 46;
@@ -22,12 +24,27 @@ const M_RIGHT = 14;
 const M_TOP = 12;
 const M_BOTTOM = 26;
 
-// view state: x/time is pan+zoomable, y (hour 0..24) is fixed to the plot height
-let viewT0 = 0; // ts at the left plot edge
+// --- view state ------------------------------------------------------------
+// x/time: pan + zoom (viewT0 = ts at the left plot edge)
+let viewT0 = 0;
 let pxPerMs = 1;
 let tMin = 0;
 let tMax = 1;
 let fitPxPerMs = 1;
+
+// y/hours: pan + zoom. yFactor 1 = the full 0–24h day fits the plot;
+// higher values stretch the day so plays within one day get breathing room.
+// viewH0 = hour at the top plot edge, clamped so the view stays inside 0–24.
+let yFactor = 1;
+let viewH0 = 0;
+
+const X_MAX_FACTOR = 2000; // matches the old wheel-zoom cap
+const Y_MAX_FACTOR = 24; // 24× = one hour spans the whole plot height
+
+// Slider positions 0..100, mapped exponentially to the zoom factors.
+const xZoomSlider = ref(0);
+const yZoomSlider = ref(0);
+let syncingSliders = false; // guard: wheel/reset writes sliders w/o re-applying
 
 let cssW = 1;
 let cssH = 1;
@@ -39,16 +56,82 @@ let rafId = 0;
 
 let dragging = false;
 let lastDragX = 0;
+let lastDragY = 0;
 
-/** Theme colors, read from the CSS custom properties at render time. */
-function themeColors() {
-  const style = getComputedStyle(document.documentElement);
-  return {
-    grid: style.getPropertyValue("--axis").trim() || "#888",
-    label: style.getPropertyValue("--text-3").trim() || "#888",
-    series: style.getPropertyValue("--series").trim() || "#0891b2",
-    dim: style.getPropertyValue("--series-dim").trim() || "rgba(120,120,120,0.3)",
-  };
+// ---------------------------------------------------------------------------
+// Flat buffers — the hot loops must never touch Vue's reactive proxies or do
+// per-frame string work. Rebuilt once whenever props.points changes.
+// points arrive sorted by ts ascending (the API orders by playedAt), which
+// lets render/hover binary-search the visible range instead of scanning all.
+// ---------------------------------------------------------------------------
+let count = 0;
+let tsArr = new Float64Array(0);
+let hourArr = new Float64Array(0);
+let trackRaw: string[] = [];
+let artistRaw: string[] = [];
+let playlistRaw: (string | null)[] = [];
+let trackLower: string[] = [];
+let artistLower: string[] = [];
+
+// 1 = matches the current highlight query; null when no query is active.
+// Recomputed once per query change — not per frame, not per keystroke render.
+let matchMask: Uint8Array | null = null;
+
+// Pixel-dedupe grid: one Int32 per css pixel holding the stamp of the last
+// pass that drew there. Zoomed out, most of 190k dots collapse onto the same
+// pixels — skipping those cuts the drawn arcs to roughly the visible pixels.
+let grid = new Int32Array(0);
+let gridW = 0;
+let gridH = 0;
+let stamp = 0;
+
+function rebuildBuffers() {
+  const pts = props.points;
+  const n = pts.length;
+  count = n;
+  tsArr = new Float64Array(n);
+  hourArr = new Float64Array(n);
+  trackRaw = new Array(n);
+  artistRaw = new Array(n);
+  playlistRaw = new Array(n);
+  trackLower = new Array(n);
+  artistLower = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const p = pts[i]!;
+    tsArr[i] = p.ts;
+    hourArr[i] = p.hour;
+    trackRaw[i] = p.track;
+    artistRaw[i] = p.artist;
+    playlistRaw[i] = p.playlist;
+    trackLower[i] = p.track.toLowerCase();
+    artistLower[i] = p.artist.toLowerCase();
+  }
+  recomputeMask();
+}
+
+function recomputeMask() {
+  const q = (props.highlight ?? "").trim().toLowerCase();
+  if (!q) {
+    matchMask = null;
+    return;
+  }
+  const mask = new Uint8Array(count);
+  for (let i = 0; i < count; i++) {
+    if (artistLower[i]!.includes(q) || trackLower[i]!.includes(q)) mask[i] = 1;
+  }
+  matchMask = mask;
+}
+
+/** First index with tsArr[i] >= v (tsArr is ascending). */
+function lowerBound(v: number): number {
+  let lo = 0;
+  let hi = count;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (tsArr[mid]! < v) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 function plotW() {
@@ -58,19 +141,31 @@ function plotH() {
   return Math.max(1, cssH - M_TOP - M_BOTTOM);
 }
 
+// --- y transform -------------------------------------------------------------
+function pxPerHour() {
+  return (plotH() / 24) * yFactor;
+}
+function visibleHours() {
+  return 24 / yFactor;
+}
+function clampViewH0(h: number) {
+  return Math.min(Math.max(h, 0), 24 - visibleHours());
+}
+function yToPx(hour: number) {
+  return M_TOP + (hour - viewH0) * pxPerHour();
+}
+function pxToHour(py: number) {
+  return viewH0 + (py - M_TOP) / pxPerHour();
+}
+
 function computeDomain() {
-  const first = props.points[0];
-  if (!first) {
+  if (!count) {
     tMin = Date.now() - DAY_MS;
     tMax = Date.now();
     return;
   }
-  tMin = first.ts;
-  tMax = first.ts;
-  for (const p of props.points) {
-    if (p.ts < tMin) tMin = p.ts;
-    if (p.ts > tMax) tMax = p.ts;
-  }
+  tMin = tsArr[0]!;
+  tMax = tsArr[count - 1]!;
   if (tMax <= tMin) tMax = tMin + DAY_MS;
 }
 
@@ -90,10 +185,49 @@ function xToPx(ts: number) {
 function pxToTs(px: number) {
   return viewT0 + (px - M_LEFT) / pxPerMs;
 }
-// hour 0 at top, 24 at bottom
-function yToPx(hour: number) {
-  return M_TOP + (hour / 24) * plotH();
+
+// --- slider <-> factor mapping -----------------------------------------------
+function xFactorFromSlider(v: number) {
+  return Math.pow(X_MAX_FACTOR, v / 100);
 }
+function yFactorFromSlider(v: number) {
+  return Math.pow(Y_MAX_FACTOR, v / 100);
+}
+function sliderFromXFactor(f: number) {
+  return Math.min(100, Math.max(0, (100 * Math.log(f)) / Math.log(X_MAX_FACTOR)));
+}
+function sliderFromYFactor(f: number) {
+  return Math.min(100, Math.max(0, (100 * Math.log(f)) / Math.log(Y_MAX_FACTOR)));
+}
+
+/** Reflect the current view factors in the sliders without re-applying them. */
+function syncSliders() {
+  syncingSliders = true;
+  xZoomSlider.value = sliderFromXFactor(pxPerMs / fitPxPerMs);
+  yZoomSlider.value = sliderFromYFactor(yFactor);
+  nextTick(() => {
+    syncingSliders = false;
+  });
+}
+
+watch(xZoomSlider, (v) => {
+  if (syncingSliders) return;
+  // zoom around the plot center so the slider feels stable
+  const centerTs = pxToTs(M_LEFT + plotW() / 2);
+  pxPerMs = fitPxPerMs * xFactorFromSlider(v);
+  viewT0 = centerTs - plotW() / 2 / pxPerMs;
+  tooltip.value = null;
+  scheduleRender();
+});
+
+watch(yZoomSlider, (v) => {
+  if (syncingSliders) return;
+  const centerHour = viewH0 + visibleHours() / 2;
+  yFactor = yFactorFromSlider(v);
+  viewH0 = clampViewH0(centerHour - visibleHours() / 2);
+  tooltip.value = null;
+  scheduleRender();
+});
 
 function resizeCanvas() {
   const c = canvas.value;
@@ -169,8 +303,93 @@ function buildXTicks(): { x: number; label: string }[] {
   return ticks;
 }
 
-function matches(p: PlayPoint, q: string) {
-  return p.artist.toLowerCase().includes(q) || p.track.toLowerCase().includes(q);
+/** Hour gridlines adapt to the vertical zoom (6h steps down to 15min). */
+function buildYTicks(): { y: number; label: string }[] {
+  const visH = visibleHours();
+  const h1 = viewH0 + visH;
+  const steps = [6, 3, 1, 0.5, 0.25];
+  let step = steps[0]!;
+  for (const s of steps) {
+    step = s;
+    if (visH / s >= 4) break;
+  }
+  const ticks: { y: number; label: string }[] = [];
+  const start = Math.ceil(viewH0 / step) * step;
+  for (let h = start; h <= h1 + 1e-9; h += step) {
+    const hh = Math.floor(h);
+    const mm = Math.round((h - hh) * 60);
+    ticks.push({ y: yToPx(h), label: `${hh}:${String(mm).padStart(2, "0")}` });
+  }
+  return ticks;
+}
+
+/** Theme colors, read from the CSS custom properties at render time. */
+function themeColors() {
+  const style = getComputedStyle(document.documentElement);
+  return {
+    grid: style.getPropertyValue("--axis").trim() || "#888",
+    label: style.getPropertyValue("--text-3").trim() || "#888",
+    series: style.getPropertyValue("--series").trim() || "#0891b2",
+    dim: style.getPropertyValue("--series-dim").trim() || "rgba(120,120,120,0.3)",
+  };
+}
+
+// Above this many points in the visible range, dots render as squares —
+// at that density the shape is indistinguishable and rects rasterize far
+// faster than arcs (no bezier curves).
+const RECT_THRESHOLD = 30_000;
+
+/**
+ * Draw one pass of dots over the visible index range.
+ * wantMatch: -1 = all points, 0/1 = only points with that matchMask value.
+ * shapeCount: how many dots this pass will roughly draw — decides
+ * squares vs circles (defaults to the whole visible range).
+ */
+function drawPass(
+  i0: number,
+  i1: number,
+  wantMatch: -1 | 0 | 1,
+  radius: number,
+  shapeCount = i1 - i0
+) {
+  if (!ctx) return;
+  const left = M_LEFT - 3;
+  const right = cssW - M_RIGHT + 3;
+  const top = M_TOP - 3;
+  const bottom = M_TOP + plotH() + 3;
+  const hourScale = pxPerHour();
+  const mask = matchMask;
+  const asRect = shapeCount > RECT_THRESHOLD;
+  const size = radius * 2;
+
+  stamp++;
+  let inPath = 0;
+  ctx.beginPath();
+  for (let i = i0; i < i1; i++) {
+    if (wantMatch >= 0 && mask![i] !== wantMatch) continue;
+    const x = M_LEFT + (tsArr[i]! - viewT0) * pxPerMs;
+    if (x < left || x > right) continue;
+    const y = M_TOP + (hourArr[i]! - viewH0) * hourScale;
+    if (y < top || y > bottom) continue;
+
+    // pixel dedupe — dots that land on an already-drawn pixel add nothing
+    const gi = (y | 0) * gridW + (x | 0);
+    if (grid[gi] === stamp) continue;
+    grid[gi] = stamp;
+
+    if (asRect) {
+      ctx.rect(x - radius, y - radius, size, size);
+    } else {
+      ctx.moveTo(x + radius, y);
+      ctx.arc(x, y, radius, 0, TWO_PI);
+    }
+    if (++inPath >= CHUNK) {
+      ctx.fill();
+      ctx.beginPath();
+      inPath = 0;
+    }
+  }
+  if (inPath > 0) ctx.fill();
 }
 
 function render() {
@@ -178,6 +397,16 @@ function render() {
   const colors = themeColors();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
+
+  // keep the dedupe grid matched to the canvas size
+  const gw = Math.max(1, Math.ceil(cssW));
+  const gh = Math.max(1, Math.ceil(cssH));
+  if (gw !== gridW || gh !== gridH) {
+    gridW = gw;
+    gridH = gh;
+    grid = new Int32Array(gw * gh);
+    stamp = 0;
+  }
 
   // axes
   ctx.strokeStyle = colors.grid;
@@ -188,15 +417,15 @@ function render() {
   // y-axis (hours)
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-  for (const h of [0, 6, 12, 18, 24]) {
-    const y = yToPx(h);
+  for (const t of buildYTicks()) {
+    if (t.y < M_TOP - 1 || t.y > cssH - M_BOTTOM + 1) continue;
     ctx.beginPath();
-    ctx.moveTo(M_LEFT, y);
-    ctx.lineTo(cssW - M_RIGHT, y);
+    ctx.moveTo(M_LEFT, t.y);
+    ctx.lineTo(cssW - M_RIGHT, t.y);
     ctx.globalAlpha = 0.45;
     ctx.stroke();
     ctx.globalAlpha = 1;
-    ctx.fillText(`${h}:00`, M_LEFT - 6, y);
+    ctx.fillText(t.label, M_LEFT - 6, t.y);
   }
 
   // x-axis (dates)
@@ -214,66 +443,51 @@ function render() {
     ctx.fillText(t.label, t.x, baseY + 4);
   }
 
-  // points
-  const q = (props.highlight ?? "").trim().toLowerCase();
-  const left = M_LEFT - 3;
-  const right = cssW - M_RIGHT + 3;
+  // visible index range (with slack for the dot radius)
+  const slackMs = 8 / pxPerMs;
+  const i0 = lowerBound(pxToTs(M_LEFT - 3) - slackMs);
+  const i1 = lowerBound(pxToTs(cssW - M_RIGHT + 3) + slackMs);
   const r = 2.6;
 
-  // Batch dots into chunked paths (one fill per ~4k dots) — a fill() per dot
-  // makes 190k points unusably slow, and a single 190k-arc path chokes the
-  // rasterizer. Chunking bounds path complexity and keeps some alpha stacking.
-  const CHUNK = 4000;
-  const drawDots = (pass: (p: PlayPoint) => boolean, radius: number) => {
-    let inPath = 0;
-    ctx!.beginPath();
-    for (const p of props.points) {
-      if (!pass(p)) continue;
-      const x = xToPx(p.ts);
-      if (x < left || x > right) continue;
-      const y = yToPx(p.hour);
-      ctx!.moveTo(x + radius, y);
-      ctx!.arc(x, y, radius, 0, Math.PI * 2);
-      if (++inPath >= CHUNK) {
-        ctx!.fill();
-        ctx!.beginPath();
-        inPath = 0;
-      }
-    }
-    if (inPath > 0) ctx!.fill();
-  };
-
   // when highlighting: draw non-matches first (dim), matches on top (bright)
-  if (q) {
+  if (matchMask) {
+    // Highlighted dots are the subject — draw them as circles unless the
+    // *matching* dots alone exceed the threshold (the dim backdrop still
+    // takes the cheap square path on its own count).
+    let visibleMatches = 0;
+    for (let i = i0; i < i1; i++) if (matchMask[i]) visibleMatches++;
+
     ctx.fillStyle = colors.dim;
-    drawDots((p) => !matches(p, q), r);
+    drawPass(i0, i1, 0, r);
     ctx.fillStyle = colors.series;
     ctx.globalAlpha = 0.95;
-    drawDots((p) => matches(p, q), r * 1.7);
+    drawPass(i0, i1, 1, r * 1.7, visibleMatches);
     ctx.globalAlpha = 1;
   } else {
     ctx.fillStyle = colors.series;
     ctx.globalAlpha = 0.62;
-    drawDots(() => true, r);
+    drawPass(i0, i1, -1, r);
     ctx.globalAlpha = 1;
   }
 }
 
-function findNearest(mx: number, my: number): PlayPoint | null {
-  const left = M_LEFT - 3;
-  const right = cssW - M_RIGHT + 3;
-  let best: PlayPoint | null = null;
-  let bestD = 8 * 8; // 8px pick radius, squared
-  for (const p of props.points) {
-    const x = xToPx(p.ts);
-    if (x < left || x > right) continue;
-    const y = yToPx(p.hour);
+function findNearest(mx: number, my: number): number {
+  const pickR = 8;
+  const hourScale = pxPerHour();
+  // only consider points within pickR horizontally of the pointer
+  const i0 = lowerBound(pxToTs(mx - pickR));
+  const i1 = lowerBound(pxToTs(mx + pickR));
+  let best = -1;
+  let bestD = pickR * pickR;
+  for (let i = i0; i < i1; i++) {
+    const x = M_LEFT + (tsArr[i]! - viewT0) * pxPerMs;
+    const y = M_TOP + (hourArr[i]! - viewH0) * hourScale;
     const dx = x - mx;
     const dy = y - my;
     const d = dx * dx + dy * dy;
     if (d < bestD) {
       bestD = d;
-      best = p;
+      best = i;
     }
   }
   return best;
@@ -286,18 +500,21 @@ function onMouseMove(e: MouseEvent) {
 
   if (dragging) {
     const dx = mx - lastDragX;
+    const dy = my - lastDragY;
     viewT0 -= dx / pxPerMs;
+    viewH0 = clampViewH0(viewH0 - dy / pxPerHour());
     lastDragX = mx;
+    lastDragY = my;
     tooltip.value = null;
     scheduleRender();
     return;
   }
 
-  const near = findNearest(mx, my);
-  if (near) {
-    const when = new Date(near.ts).toLocaleString();
-    const playlistLine = near.playlist ? `\nfrom ${near.playlist}` : "";
-    tooltip.value = { x: mx, y: my, text: `${when}\n${near.artist} — ${near.track}${playlistLine}` };
+  const i = findNearest(mx, my);
+  if (i >= 0) {
+    const when = new Date(tsArr[i]!).toLocaleString();
+    const playlistLine = playlistRaw[i] ? `\nfrom ${playlistRaw[i]}` : "";
+    tooltip.value = { x: mx, y: my, text: `${when}\n${artistRaw[i]} — ${trackRaw[i]}${playlistLine}` };
   } else {
     tooltip.value = null;
   }
@@ -307,6 +524,7 @@ function onMouseDown(e: MouseEvent) {
   const rect = canvas.value!.getBoundingClientRect();
   dragging = true;
   lastDragX = e.clientX - rect.left;
+  lastDragY = e.clientY - rect.top;
   tooltip.value = null;
 }
 function onMouseUp() {
@@ -321,17 +539,31 @@ function onWheel(e: WheelEvent) {
   e.preventDefault();
   const rect = canvas.value!.getBoundingClientRect();
   const mx = e.clientX - rect.left;
-  const tUnder = pxToTs(mx);
-  const factor = Math.exp(-e.deltaY * 0.0015);
-  const next = Math.min(fitPxPerMs * 2000, Math.max(fitPxPerMs * 0.5, pxPerMs * factor));
-  pxPerMs = next;
-  viewT0 = tUnder - (mx - M_LEFT) / pxPerMs;
+  const my = e.clientY - rect.top;
+  const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+  const factor = Math.exp(-delta * 0.0015);
+
+  if (e.shiftKey) {
+    // vertical zoom, anchored at the hour under the pointer
+    const hourUnder = pxToHour(my);
+    yFactor = Math.min(Y_MAX_FACTOR, Math.max(1, yFactor * factor));
+    viewH0 = clampViewH0(hourUnder - (my - M_TOP) / pxPerHour());
+  } else {
+    // horizontal zoom, anchored at the date under the pointer
+    const tUnder = pxToTs(mx);
+    pxPerMs = Math.min(fitPxPerMs * X_MAX_FACTOR, Math.max(fitPxPerMs * 0.5, pxPerMs * factor));
+    viewT0 = tUnder - (mx - M_LEFT) / pxPerMs;
+  }
+  syncSliders();
   tooltip.value = null;
   scheduleRender();
 }
 
 function resetView() {
+  yFactor = 1;
+  viewH0 = 0;
   fitView();
+  syncSliders();
   scheduleRender();
 }
 
@@ -341,6 +573,7 @@ onMounted(() => {
   const c = canvas.value;
   if (!c) return;
   ctx = c.getContext("2d");
+  rebuildBuffers();
   resizeCanvas();
   fitView();
   render();
@@ -349,6 +582,7 @@ onMounted(() => {
     const hadFit = didFit;
     resizeCanvas();
     if (!hadFit) fitView();
+    viewH0 = clampViewH0(viewH0);
     scheduleRender();
   });
   if (container.value) ro.observe(container.value);
@@ -376,6 +610,7 @@ onBeforeUnmount(() => {
 watch(
   () => props.points,
   () => {
+    rebuildBuffers();
     didFit = false;
     resizeCanvas();
     fitView();
@@ -384,13 +619,45 @@ watch(
     render();
   }
 );
-watch(() => props.highlight, scheduleRender);
+watch(
+  () => props.highlight,
+  () => {
+    recomputeMask();
+    scheduleRender();
+  }
+);
 watch(theme, scheduleRender);
 </script>
 
 <template>
   <div class="cloud-container" ref="container">
     <canvas ref="canvas" class="cloud-canvas"></canvas>
+
+    <div class="zoom-controls" @mousedown.stop>
+      <label class="zoom-row" title="Horizontal zoom (dates) — also mouse wheel">
+        <span class="zoom-icon" aria-hidden="true">↔</span>
+        <input
+          v-model.number="xZoomSlider"
+          type="range"
+          min="0"
+          max="100"
+          step="0.5"
+          aria-label="Horizontal zoom"
+        />
+      </label>
+      <label class="zoom-row" title="Vertical zoom (time of day) — also Shift + mouse wheel">
+        <span class="zoom-icon" aria-hidden="true">↕</span>
+        <input
+          v-model.number="yZoomSlider"
+          type="range"
+          min="0"
+          max="100"
+          step="0.5"
+          aria-label="Vertical zoom"
+        />
+      </label>
+    </div>
+
     <div
       v-if="tooltip"
       class="cloud-tooltip"
@@ -419,6 +686,39 @@ watch(theme, scheduleRender);
 .cloud-canvas:active {
   cursor: grabbing;
 }
+
+.zoom-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  z-index: 2;
+}
+.zoom-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.zoom-icon {
+  font-size: 12px;
+  color: var(--text-2);
+  width: 14px;
+  text-align: center;
+}
+.zoom-controls input[type="range"] {
+  width: 130px;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .cloud-tooltip {
   position: absolute;
   pointer-events: none;

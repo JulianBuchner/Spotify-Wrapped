@@ -41,7 +41,11 @@ src/
     TopList.vue             tabbed Top-10 (songs/artists/albums/playlists)
     RecentlyPlayed.vue      latest plays, 60s auto-refresh
     ForgottenList.vue       "forgotten favorites" list
-    ListeningCloud.vue      pan/zoom canvas scatter, theme-aware
+    ListeningCloud.vue      pan/zoom canvas scatter, theme-aware; independent
+                            x/y zoom (sliders + wheel, Shift+wheel = vertical),
+                            free 2-axis drag panning; built for 100k+ points
+                            (typed-array buffers, binary-searched visible
+                            range, pixel dedupe, debounced highlight)
 ```
 
 ## Conventions

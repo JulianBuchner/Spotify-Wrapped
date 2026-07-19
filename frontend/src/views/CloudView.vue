@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, shallowRef, onMounted, onBeforeUnmount, watch } from "vue";
 import { getHistoryPoints } from "../api";
 import DateRangeFilter from "../components/DateRangeFilter.vue";
 import ListeningCloud from "../components/ListeningCloud.vue";
@@ -8,10 +8,24 @@ import { formatNumber } from "../lib/format";
 import type { DateWindow, PlayPoint } from "../types";
 
 const window_ = ref<DateWindow>({ range: "all_time", from: "", to: "" });
-const highlight = ref("");
 const playlist = ref(""); // contextUri; "" = all — note: only new plays carry context
 
-const points = ref<PlayPoint[]>([]);
+// The typed text debounces into `highlight` so the canvas doesn't recompute
+// its match mask and repaint 190k dots on every keystroke.
+const highlightInput = ref("");
+const highlight = ref("");
+let highlightTimer = 0;
+watch(highlightInput, (v) => {
+  window.clearTimeout(highlightTimer);
+  highlightTimer = window.setTimeout(() => {
+    highlight.value = v;
+  }, 150);
+});
+onBeforeUnmount(() => window.clearTimeout(highlightTimer));
+
+// shallowRef: the array is huge and immutable once loaded — deep reactivity
+// would wrap every point in a proxy for no benefit.
+const points = shallowRef<PlayPoint[]>([]);
 const loading = ref(false);
 const errorMsg = ref<string | null>(null);
 
@@ -56,7 +70,7 @@ watch([window_, playlist], load, { deep: true });
       </div>
       <div class="toolbar-right">
         <input
-          v-model="highlight"
+          v-model="highlightInput"
           class="input highlight-input"
           type="search"
           placeholder="Highlight artist or track…"
