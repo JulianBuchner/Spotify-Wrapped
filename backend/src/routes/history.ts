@@ -97,67 +97,91 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
       return sendCached(cached);
     }
 
-    // build plain SQL (this route bypasses Prisma — see header comment)
-    const conds: string[] = [];
-    const params: unknown[] = [];
-    if (from) {
-      conds.push(`"playedAt" >= ?`);
-      params.push(from.toISOString());
-    }
-    if (to) {
-      conds.push(`"playedAt" <= ?`);
-      params.push(to.toISOString());
-    }
     const playlist = typeof query.playlist === "string" ? query.playlist.trim() : "";
-    if (playlist) {
-      conds.push(`("contextType" = 'playlist' AND "contextUri" = ?)`);
-      params.push(playlist);
-    }
-    const whereSql = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-
-    // Safety cap only — must stay above the full play count so the cloud
-    // shows the whole history (a 100k cap silently chopped off everything
-    // after ~2024 once the 171k-row export import landed).
-    const CAP = 500_000;
-    const rows = readOnlyDb()
-      .prepare(
-        `SELECT "playedAt", "trackName", "artistName", "playlistName"
-         FROM "Play" ${whereSql}
-         ORDER BY "playedAt" ASC
-         LIMIT ${CAP}`
-      )
-      .raw()
-      .all(...params) as Array<[string, string, string, string | null]>;
-
-    // Columnar payload: with ~190k rows, per-row objects cost ~26MB of JSON
-    // and seconds of stringify time on the Pi. Parallel arrays (epoch ms +
-    // names) more than halve the size and serialize far faster.
-    const n = rows.length;
-    const t = new Array<number>(n);
-    const track = new Array<string>(n);
-    const artist = new Array<string>(n);
-    const playlistCol = new Array<string | null>(n);
-    for (let i = 0; i < n; i++) {
-      const r = rows[i]!;
-      t[i] = Date.parse(r[0]);
-      track[i] = r[1];
-      artist[i] = r[2];
-      playlistCol[i] = r[3] ?? null;
-    }
-
-    const json = JSON.stringify({
-      data: { t, track, artist, playlist: playlistCol },
-      meta: { total: n, capped: n === CAP },
-    });
-    const gz = gzipSync(json, { level: 3 });
-    if (pointsCache.size >= POINTS_MAX_ENTRIES) {
-      const oldest = pointsCache.keys().next().value;
-      if (oldest !== undefined) pointsCache.delete(oldest);
-    }
-    pointsCache.set(cacheKey, { json, gz, at: Date.now() });
-
-    return sendCached({ json, gz });
+    return sendCached(buildPointsPayload(cacheKey, from, to, playlist));
   });
+
+  // Pre-warm the default all-time window on boot and keep it fresh — the
+  // cold build costs ~10s on the Pi (SD read + stringify + gzip of 10MB),
+  // and this is the exact request CloudView makes on every visit.
+  const PREWARM_URL = "/api/history/points?range=all_time";
+  const prewarm = () => {
+    try {
+      const { from, to } = buildPlayedAtFilter({ range: "all_time" });
+      buildPointsPayload(PREWARM_URL, from, to, "");
+    } catch (err) {
+      app.log.warn({ err }, "points prewarm failed");
+    }
+  };
+  setTimeout(prewarm, 5_000).unref();
+  setInterval(prewarm, 4 * 60_000).unref();
 };
+
+/** Query (raw sqlite), serialize, gzip and cache one points window. */
+function buildPointsPayload(
+  cacheKey: string,
+  from: Date | undefined,
+  to: Date | undefined,
+  playlist: string
+): { json: string; gz: Buffer } {
+  // plain SQL — this path bypasses Prisma (see header comment)
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (from) {
+    conds.push(`"playedAt" >= ?`);
+    params.push(from.toISOString());
+  }
+  if (to) {
+    conds.push(`"playedAt" <= ?`);
+    params.push(to.toISOString());
+  }
+  if (playlist) {
+    conds.push(`("contextType" = 'playlist' AND "contextUri" = ?)`);
+    params.push(playlist);
+  }
+  const whereSql = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+
+  // Safety cap only — must stay above the full play count so the cloud
+  // shows the whole history (a 100k cap silently chopped off everything
+  // after ~2024 once the 171k-row export import landed).
+  const CAP = 500_000;
+  const rows = readOnlyDb()
+    .prepare(
+      `SELECT "playedAt", "trackName", "artistName", "playlistName"
+       FROM "Play" ${whereSql}
+       ORDER BY "playedAt" ASC
+       LIMIT ${CAP}`
+    )
+    .raw()
+    .all(...params) as Array<[string, string, string, string | null]>;
+
+  // Columnar payload: with ~190k rows, per-row objects cost ~26MB of JSON
+  // and seconds of stringify time on the Pi. Parallel arrays (epoch ms +
+  // names) more than halve the size and serialize far faster.
+  const n = rows.length;
+  const t = new Array<number>(n);
+  const track = new Array<string>(n);
+  const artist = new Array<string>(n);
+  const playlistCol = new Array<string | null>(n);
+  for (let i = 0; i < n; i++) {
+    const r = rows[i]!;
+    t[i] = Date.parse(r[0]);
+    track[i] = r[1];
+    artist[i] = r[2];
+    playlistCol[i] = r[3] ?? null;
+  }
+
+  const json = JSON.stringify({
+    data: { t, track, artist, playlist: playlistCol },
+    meta: { total: n, capped: n === CAP },
+  });
+  const gz = gzipSync(json, { level: 3 });
+  if (pointsCache.size >= POINTS_MAX_ENTRIES) {
+    const oldest = pointsCache.keys().next().value;
+    if (oldest !== undefined) pointsCache.delete(oldest);
+  }
+  pointsCache.set(cacheKey, { json, gz, at: Date.now() });
+  return { json, gz };
+}
 
 export default historyRoutes;
