@@ -60,4 +60,4 @@ Play something on Spotify and watch the play count climb.
 
 ## Deployment
 
-The reference deployment runs on a Raspberry Pi under pm2, with the compiled backend (`npm run build` → `dist/server.js`) and a nightly `sqlite3 .backup` snapshot. See `backend/README.md` for the update sequence.
+The reference deployment runs on a Raspberry Pi under pm2, with the compiled backend (`npm run build` → `dist/server.js`) and a nightly `sqlite3 .backup` snapshot. The backend also serves the built frontend, so the whole dashboard is reachable LAN-wide at `http://<pi-host>:3000/Spotify-Wrapped/` — private by default as long as the router forwards no ports. See `backend/README.md` for the update sequence.

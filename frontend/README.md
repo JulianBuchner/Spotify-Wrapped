@@ -18,6 +18,8 @@ npm run build      # type-checks (vue-tsc) + builds to dist/
 
 The app is served under the **`/Spotify-Wrapped/` base path** (`vite.config.ts`); the router derives its base from it, so deep links like `/Spotify-Wrapped/cloud` work in production.
 
+Production builds use `.env.production` (`VITE_API_BASE_URL=""`), which makes all API calls **same-origin relative** — the backend serves `dist/` itself (see `backend/README.md`), so one host serves both app and API. The localhost URL in `.env` only applies to `npm run dev`.
+
 ## Structure
 
 ```

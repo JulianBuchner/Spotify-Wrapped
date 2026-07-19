@@ -76,6 +76,15 @@ All endpoints are `GET`. Most accept a date window — either `?range=today|last
 | `/api/wrapped/top-artist-per-month`, `/api/wrapped/album-obsessions`, `/api/wrapped/top-albums` | wrapped-style fun facts |
 | `/api/stats/artist?name=`, `/api/stats/unique-tracks`, `/api/stats/listen-time` | legacy endpoints, superseded by `summary` |
 
+## Serving the frontend
+
+The server also hosts the built dashboard: if `../frontend/dist` exists, it is
+served under `/Spotify-Wrapped/` (matching the Vite base path) with an SPA
+fallback for deep links, and `/` redirects there. On the Pi that makes the
+whole app available LAN-wide at `http://julian-pi.fritz.box:3000/Spotify-Wrapped/`
+— same origin, so no CORS involved. Without a `dist` folder the server just
+logs a warning and serves the API only.
+
 ## Deployment (Raspberry Pi + pm2)
 
 pm2 runs the **compiled** server, so a change is live only after build + restart:
@@ -87,6 +96,7 @@ npm install                  # if dependencies changed
 npx prisma migrate deploy    # if there are new migrations
 npx prisma generate          # required after any schema change (stale client → TS2353 on build)
 npm run build
+(cd ../frontend && npm ci && npm run build)   # if the frontend changed
 pm2 restart Spotify-Wrapped-backend
 ```
 

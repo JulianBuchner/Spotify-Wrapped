@@ -1,5 +1,8 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
+import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import { Prisma } from "@prisma/client";
 import { pollAllUsersOnce } from "./poller";
@@ -36,6 +39,31 @@ async function main() {
   await app.register(wrappedRoutes);
   await app.register(historyRoutes);
   await app.register(detailRoutes);
+
+  // Serve the built frontend (LAN hosting on the Pi) under the same prefix
+  // as the Vite base path. Works from both src/ (ts-node-dev) and dist/
+  // (compiled) since both sit one level below backend/.
+  const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
+  if (fs.existsSync(frontendDist)) {
+    await app.register(fastifyStatic, {
+      root: frontendDist,
+      prefix: "/Spotify-Wrapped/",
+    });
+
+    // SPA fallback: deep links like /Spotify-Wrapped/cloud must serve
+    // index.html and let vue-router take over. API 404s stay JSON.
+    app.setNotFoundHandler((request, reply) => {
+      const url = request.raw.url ?? "";
+      if (request.method === "GET" && url.startsWith("/Spotify-Wrapped")) {
+        return reply.sendFile("index.html");
+      }
+      return reply.status(404).send({ error: "Not found" });
+    });
+
+    app.get("/", async (_request, reply) => reply.redirect("/Spotify-Wrapped/"));
+  } else {
+    app.log.warn(`frontend dist not found at ${frontendDist} — dashboard not served`);
+  }
 
   app.get("/health", async () => ({ status: "ok" }));
 

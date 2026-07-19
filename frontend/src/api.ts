@@ -14,7 +14,8 @@ import type {
   TopSong,
 } from "./types";
 
-const API = import.meta.env.VITE_API_BASE_URL;
+// Empty string = same-origin (production build served by the backend).
+const API = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export type QueryValue = string | number | undefined;
 
