@@ -220,38 +220,41 @@ function render() {
   const right = cssW - M_RIGHT + 3;
   const r = 2.6;
 
+  // Batch dots into chunked paths (one fill per ~4k dots) — a fill() per dot
+  // makes 190k points unusably slow, and a single 190k-arc path chokes the
+  // rasterizer. Chunking bounds path complexity and keeps some alpha stacking.
+  const CHUNK = 4000;
+  const drawDots = (pass: (p: PlayPoint) => boolean, radius: number) => {
+    let inPath = 0;
+    ctx!.beginPath();
+    for (const p of props.points) {
+      if (!pass(p)) continue;
+      const x = xToPx(p.ts);
+      if (x < left || x > right) continue;
+      const y = yToPx(p.hour);
+      ctx!.moveTo(x + radius, y);
+      ctx!.arc(x, y, radius, 0, Math.PI * 2);
+      if (++inPath >= CHUNK) {
+        ctx!.fill();
+        ctx!.beginPath();
+        inPath = 0;
+      }
+    }
+    if (inPath > 0) ctx!.fill();
+  };
+
   // when highlighting: draw non-matches first (dim), matches on top (bright)
   if (q) {
     ctx.fillStyle = colors.dim;
-    for (const p of props.points) {
-      const x = xToPx(p.ts);
-      if (x < left || x > right) continue;
-      if (matches(p, q)) continue;
-      ctx.beginPath();
-      ctx.arc(x, yToPx(p.hour), r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawDots((p) => !matches(p, q), r);
     ctx.fillStyle = colors.series;
     ctx.globalAlpha = 0.95;
-    for (const p of props.points) {
-      const x = xToPx(p.ts);
-      if (x < left || x > right) continue;
-      if (!matches(p, q)) continue;
-      ctx.beginPath();
-      ctx.arc(x, yToPx(p.hour), r * 1.7, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawDots((p) => matches(p, q), r * 1.7);
     ctx.globalAlpha = 1;
   } else {
     ctx.fillStyle = colors.series;
     ctx.globalAlpha = 0.62;
-    for (const p of props.points) {
-      const x = xToPx(p.ts);
-      if (x < left || x > right) continue;
-      ctx.beginPath();
-      ctx.arc(x, yToPx(p.hour), r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawDots(() => true, r);
     ctx.globalAlpha = 1;
   }
 }
@@ -376,7 +379,9 @@ watch(
     didFit = false;
     resizeCanvas();
     fitView();
-    scheduleRender();
+    // Paint synchronously: resizeCanvas() just cleared the canvas, and new
+    // data deserves an immediate frame rather than waiting on the next rAF.
+    render();
   }
 );
 watch(() => props.highlight, scheduleRender);

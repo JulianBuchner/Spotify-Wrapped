@@ -64,13 +64,17 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
     if (pl) conditions.push(pl);
     const where = whereClause(conditions);
 
+    // Safety cap only — must stay above the full play count so the cloud
+    // shows the whole history (a 100k cap silently chopped off everything
+    // after ~2024 once the 171k-row export import landed).
+    const CAP = 500_000;
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT "playedAt" AS playedAt, "trackName" AS trackName,
              "artistName" AS artistName, "durationMs" AS durationMs,
              "playlistName" AS playlistName
       FROM "Play" ${where}
       ORDER BY "playedAt" ASC
-      LIMIT 100000`;
+      LIMIT ${CAP}`;
 
     return {
       data: rows.map((r) => ({
@@ -80,7 +84,7 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
         durationMs: num(r.durationMs),
         playlistName: r.playlistName ?? null,
       })),
-      meta: { total: rows.length },
+      meta: { total: rows.length, capped: rows.length === CAP },
     };
   });
 };
