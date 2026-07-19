@@ -25,7 +25,9 @@ import {
 } from "../lib/format";
 import type { DateWindow, Granularity, StatsSummary } from "../types";
 
-const window_ = ref<DateWindow>({ range: "all_time", from: "", to: "" });
+// Default to "today": the cheapest window (index-backed) so the first paint
+// is instant; all-time is one click away.
+const window_ = ref<DateWindow>({ range: "today", from: "", to: "" });
 
 // Playlist contextUri filter; "" = all. Scopes every chart and list below the
 // filter row. Only plays recorded since playlist tracking went live carry

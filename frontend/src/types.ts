@@ -3,7 +3,6 @@ export interface PlayPoint {
   hour: number; // 0..24 (local time, fractional)
   artist: string;
   track: string;
-  ms: number; // durationMs
   playlist: string | null; // playlist name when the play came from one
 }
 
@@ -82,12 +81,12 @@ export interface DiscoveryPoint {
   cumulative: number;
 }
 
-export interface HistoryPointRow {
-  playedAt: string;
-  trackName: string;
-  artistName: string;
-  durationMs: number;
-  playlistName: string | null;
+/** Columnar /api/history/points payload — parallel arrays, index-aligned. */
+export interface HistoryPointsData {
+  t: number[]; // playedAt as epoch ms
+  track: string[];
+  artist: string[];
+  playlist: (string | null)[];
 }
 
 /** Date filter values shared by dashboard + cloud (maps 1:1 to query params). */

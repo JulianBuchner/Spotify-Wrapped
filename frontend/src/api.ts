@@ -4,7 +4,7 @@ import type {
   DiscoveryPoint,
   ForgottenTrack,
   Granularity,
-  HistoryPointRow,
+  HistoryPointsData,
   PlaylistInfo,
   RecentPlay,
   StatsSummary,
@@ -39,6 +39,29 @@ async function apiGet<T>(path: string, params: Record<string, QueryValue> = {}):
   return body as T;
 }
 
+// ---------------------------------------------------------------------------
+// Small client cache for the read-heavy endpoints, so switching between
+// Dashboard and Listening Cloud doesn't refetch multi-second aggregations
+// (the server has its own 60s cache; this saves the round trip entirely).
+// Caches the in-flight promise, which also dedupes concurrent calls.
+// ---------------------------------------------------------------------------
+const clientCache = new Map<string, { at: number; promise: Promise<unknown> }>();
+
+function cachedGet<T>(
+  ttlMs: number,
+  path: string,
+  params: Record<string, QueryValue> = {}
+): Promise<T> {
+  const key = `${path}${buildQuery(params)}`;
+  const hit = clientCache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.promise as Promise<T>;
+  const promise = apiGet<T>(path, params);
+  clientCache.set(key, { at: Date.now(), promise });
+  // a failed request must not poison the cache
+  promise.catch(() => clientCache.delete(key));
+  return promise;
+}
+
 /** `playlist` is a playlist contextUri; empty string / undefined means "all". */
 function windowParams(w: DateWindow, playlist?: string): Record<string, QueryValue> {
   return { range: w.range, from: w.from, to: w.to, playlist };
@@ -48,8 +71,11 @@ export function getPlayCount() {
   return apiGet<{ count: number }>("/api/plays/count");
 }
 
+const STATS_TTL = 60_000;
+const POINTS_TTL = 300_000;
+
 export function getSummary(w: DateWindow, playlist?: string) {
-  return apiGet<{ data: StatsSummary }>("/api/stats/summary", windowParams(w, playlist));
+  return cachedGet<{ data: StatsSummary }>(STATS_TTL, "/api/stats/summary", windowParams(w, playlist));
 }
 
 export function getStreamsOverTime(
@@ -58,7 +84,7 @@ export function getStreamsOverTime(
   metric: "streams" | "playtime",
   playlist?: string
 ) {
-  return apiGet<{ data: BucketValue[] }>("/api/stats/streams-over-time", {
+  return cachedGet<{ data: BucketValue[] }>(STATS_TTL, "/api/stats/streams-over-time", {
     ...windowParams(w, playlist),
     granularity,
     metric,
@@ -66,56 +92,62 @@ export function getStreamsOverTime(
 }
 
 export function getListeningClock(w: DateWindow, playlist?: string) {
-  return apiGet<{ data: Array<{ hour: number; value: number }> }>(
+  return cachedGet<{ data: Array<{ hour: number; value: number }> }>(
+    STATS_TTL,
     "/api/stats/listening-clock",
     windowParams(w, playlist)
   );
 }
 
 export function getListeningByWeekday(w: DateWindow, playlist?: string) {
-  return apiGet<{ data: Array<{ weekday: number; value: number }> }>(
+  return cachedGet<{ data: Array<{ weekday: number; value: number }> }>(
+    STATS_TTL,
     "/api/stats/listening-by-weekday",
     windowParams(w, playlist)
   );
 }
 
 export function getDiscovery(w: DateWindow, granularity: Granularity, playlist?: string) {
-  return apiGet<{ data: DiscoveryPoint[] }>("/api/stats/discovery", {
+  return cachedGet<{ data: DiscoveryPoint[] }>(STATS_TTL, "/api/stats/discovery", {
     ...windowParams(w, playlist),
     granularity,
   });
 }
 
 export function getTopSongs(w: DateWindow, limit = 10, playlist?: string) {
-  return apiGet<{ data: TopSong[]; meta: { total: number } }>("/api/top/songs", {
+  return cachedGet<{ data: TopSong[] }>(STATS_TTL, "/api/top/songs", {
     ...windowParams(w, playlist),
     limit,
+    total: 0,
   });
 }
 
 export function getTopArtists(w: DateWindow, limit = 10, playlist?: string) {
-  return apiGet<{ data: TopArtist[]; meta: { total: number } }>("/api/top/artists", {
+  return cachedGet<{ data: TopArtist[] }>(STATS_TTL, "/api/top/artists", {
     ...windowParams(w, playlist),
     limit,
+    total: 0,
   });
 }
 
 export function getTopAlbums(w: DateWindow, limit = 10, playlist?: string) {
-  return apiGet<{ data: TopAlbum[]; meta: { total: number } }>("/api/top/albums", {
+  return cachedGet<{ data: TopAlbum[] }>(STATS_TTL, "/api/top/albums", {
     ...windowParams(w, playlist),
     limit,
+    total: 0,
   });
 }
 
 export function getTopPlaylists(w: DateWindow, limit = 10) {
-  return apiGet<{ data: TopPlaylist[]; meta: { total: number } }>("/api/top/playlists", {
+  return cachedGet<{ data: TopPlaylist[] }>(STATS_TTL, "/api/top/playlists", {
     ...windowParams(w),
     limit,
+    total: 0,
   });
 }
 
 export function getPlaylists() {
-  return apiGet<{ data: PlaylistInfo[] }>("/api/playlists");
+  return cachedGet<{ data: PlaylistInfo[] }>(STATS_TTL * 2, "/api/playlists");
 }
 
 export function getRecentlyPlayed(limit = 12) {
@@ -123,11 +155,12 @@ export function getRecentlyPlayed(limit = 12) {
 }
 
 export function getForgotten(limit = 10) {
-  return apiGet<{ data: ForgottenTrack[] }>("/api/forgotten", { limit });
+  return cachedGet<{ data: ForgottenTrack[] }>(STATS_TTL * 2, "/api/forgotten", { limit });
 }
 
 export function getHistoryPoints(w: DateWindow, playlist?: string) {
-  return apiGet<{ data: HistoryPointRow[]; meta: { total: number } }>(
+  return cachedGet<{ data: HistoryPointsData; meta: { total: number; capped: boolean } }>(
+    POINTS_TTL,
     "/api/history/points",
     windowParams(w, playlist)
   );

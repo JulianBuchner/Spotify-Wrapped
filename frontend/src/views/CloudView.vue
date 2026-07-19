@@ -36,19 +36,17 @@ async function load() {
   errorMsg.value = null;
   try {
     const res = await getHistoryPoints(window_.value, playlist.value);
-    points.value = res.data.map((r) => {
-      const ts = new Date(r.playedAt).getTime();
+    // columnar payload -> point objects (hour in local time, like before)
+    const { t, track, artist, playlist: pl } = res.data;
+    const n = t.length;
+    const pts: PlayPoint[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const ts = t[i]!;
       const d = new Date(ts);
       const hour = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
-      return {
-        ts,
-        hour,
-        artist: r.artistName,
-        track: r.trackName,
-        ms: r.durationMs,
-        playlist: r.playlistName,
-      };
-    });
+      pts[i] = { ts, hour, artist: artist[i]!, track: track[i]!, playlist: pl[i] ?? null };
+    }
+    points.value = pts;
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : "Failed to load points.";
     points.value = [];

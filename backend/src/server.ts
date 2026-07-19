@@ -1,12 +1,13 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import compress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
 import { Prisma } from "@prisma/client";
 import { pollAllUsersOnce } from "./poller";
-import { prisma } from "./db";
+import { prisma, applySqlitePragmas } from "./db";
 import { buildPlayedAtFilter } from "./lib/dateFilter";
 import searchRoutes from "./routes/search";
 import overviewRoutes from "./routes/overview";
@@ -30,6 +31,58 @@ async function main() {
 
   await app.register(cors, {
     origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN,
+  });
+
+  // ---------------------------------------------------------------------
+  // Tiny in-memory response cache for the heavy read-only endpoints.
+  // Aggregations over 190k rows take seconds on the Pi; the data changes
+  // at most every few minutes (one poll), so 60s of staleness is free
+  // speed. recently-played and plays/count stay uncached for freshness.
+  // NOTE: these hooks must be registered BEFORE @fastify/compress — onSend
+  // hooks run in registration order, and the cache needs the uncompressed
+  // JSON string (compression then still applies to cache hits and misses).
+  // ---------------------------------------------------------------------
+  const CACHE_TTL_MS = 60_000;
+  const CACHE_MAX_ENTRIES = 200;
+  const CACHEABLE = /^\/api\/(stats\/|top\/|history\/points|playlists|forgotten|wrapped\/)/;
+  const responseCache = new Map<string, { body: string; at: number }>();
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.method !== "GET") return;
+    const key = request.raw.url ?? "";
+    if (!CACHEABLE.test(key)) return;
+    const hit = responseCache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+      reply.header("x-cache", "hit").type("application/json");
+      return reply.send(hit.body);
+    }
+  });
+
+  app.addHook("onSend", async (request, reply, payload) => {
+    if (
+      request.method === "GET" &&
+      reply.statusCode === 200 &&
+      typeof payload === "string" &&
+      reply.getHeader("x-cache") !== "hit"
+    ) {
+      const key = request.raw.url ?? "";
+      if (CACHEABLE.test(key)) {
+        if (responseCache.size >= CACHE_MAX_ENTRIES) {
+          const oldest = responseCache.keys().next().value;
+          if (oldest !== undefined) responseCache.delete(oldest);
+        }
+        responseCache.set(key, { body: payload, at: Date.now() });
+      }
+    }
+    return payload;
+  });
+
+  // gzip responses (the history/points payload is several MB of JSON;
+  // level 3 keeps CPU cost low on the Pi)
+  await app.register(compress, {
+    encodings: ["gzip"],
+    threshold: 1024,
+    zlibOptions: { level: 3 },
   });
 
   // New endpoint groups (see ENDPOINT-PLAN.md)
@@ -145,6 +198,8 @@ async function main() {
 
     return { totalMs: agg._sum.durationMs ?? 0 };
   });
+
+  await applySqlitePragmas();
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`Backend listening on http://0.0.0.0:${PORT}`);

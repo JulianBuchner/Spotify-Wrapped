@@ -61,5 +61,7 @@ model Play {
   createdAt    DateTime @default(now())
 
   @@index([userId, playedAt])
+  @@index([playedAt]) // date-window filters query playedAt without userId
+  @@index([contextUri]) // playlist grouping + ?playlist= filters
   @@unique([userId, playedAt, spotifyUri]) // prevents duplicates cleanly
 }

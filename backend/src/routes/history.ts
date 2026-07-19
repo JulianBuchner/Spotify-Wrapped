@@ -70,21 +70,30 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
     const CAP = 500_000;
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT "playedAt" AS playedAt, "trackName" AS trackName,
-             "artistName" AS artistName, "durationMs" AS durationMs,
-             "playlistName" AS playlistName
+             "artistName" AS artistName, "playlistName" AS playlistName
       FROM "Play" ${where}
       ORDER BY "playedAt" ASC
       LIMIT ${CAP}`;
 
+    // Columnar payload: with ~190k rows, per-row objects cost ~26MB of JSON
+    // and seconds of stringify time on the Pi. Parallel arrays (epoch ms +
+    // names) more than halve the size and serialize far faster.
+    const n = rows.length;
+    const t = new Array<number>(n);
+    const track = new Array<string>(n);
+    const artist = new Array<string>(n);
+    const playlist = new Array<string | null>(n);
+    for (let i = 0; i < n; i++) {
+      const r = rows[i];
+      t[i] = new Date(r.playedAt).getTime();
+      track[i] = r.trackName;
+      artist[i] = r.artistName;
+      playlist[i] = r.playlistName ?? null;
+    }
+
     return {
-      data: rows.map((r) => ({
-        playedAt: r.playedAt,
-        trackName: r.trackName,
-        artistName: r.artistName,
-        durationMs: num(r.durationMs),
-        playlistName: r.playlistName ?? null,
-      })),
-      meta: { total: rows.length, capped: rows.length === CAP },
+      data: { t, track, artist, playlist },
+      meta: { total: n, capped: n === CAP },
     };
   });
 };

@@ -75,11 +75,16 @@ const overviewRoutes: FastifyPluginAsync = async (app) => {
       sort === "playtime" ? Prisma.sql`SUM("durationMs")` : Prisma.sql`COUNT(*)`;
     const dir = Prisma.raw(order);
 
-    const totalRows = await prisma.$queryRaw<Array<{ total: number | bigint }>>`
-      SELECT COUNT(*) AS total FROM (
-        SELECT 1 FROM "Play" ${where} GROUP BY ${Prisma.raw(`"${groupCol}"`)}
-      )`;
-    const total = num(totalRows[0]?.total);
+    // The distinct-group count costs a second full aggregation — callers that
+    // don't paginate (the dashboard) skip it with ?total=0.
+    let total: number | null = null;
+    if (query.total !== "0") {
+      const totalRows = await prisma.$queryRaw<Array<{ total: number | bigint }>>`
+        SELECT COUNT(*) AS total FROM (
+          SELECT 1 FROM "Play" ${where} GROUP BY ${Prisma.raw(`"${groupCol}"`)}
+        )`;
+      total = num(totalRows[0]?.total);
+    }
 
     let data: unknown[];
     if (entity === "songs") {

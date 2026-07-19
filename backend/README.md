@@ -65,16 +65,18 @@ All endpoints are `GET`. Most accept a date window — either `?range=today|last
 | `/api/stats/discovery` | cumulative first-time-heard tracks *(playlist ✓)* |
 | `/api/stats/new-share` | share of streams that were first-ever plays *(playlist ✓)* |
 | `/api/stats/duration-distribution?bucketSize=15` | song-length histogram |
-| `/api/top/:entity` (`songs\|artists\|albums\|playlists`) | ranked lists, `?sort=streams\|playtime`, paginated *(playlist ✓ for non-playlist entities)* |
+| `/api/top/:entity` (`songs\|artists\|albums\|playlists`) | ranked lists, `?sort=streams\|playtime`, paginated; `?total=0` skips the costly distinct-group count *(playlist ✓ for non-playlist entities)* |
 | `/api/playlists` | distinct playlists seen, for filter dropdowns |
 | `/api/recently-played?limit=` | latest plays incl. playlist name |
 | `/api/forgotten` | high historic plays, silent for 30+ days |
 | `/api/history?q=&limit=&offset=` | paginated raw play log, searchable |
-| `/api/history/points` | minimal per-play feed for the listening cloud *(playlist ✓)* |
+| `/api/history/points` | columnar per-play feed for the listening cloud (parallel arrays `t/track/artist/playlist`) *(playlist ✓)* |
 | `/api/search?q=&types=` | fuzzy search across songs/artists/albums |
 | `/api/song/:spotifyUri`, `/api/artist?name=`, `/api/album?name=` | detail + timelines |
 | `/api/wrapped/top-artist-per-month`, `/api/wrapped/album-obsessions`, `/api/wrapped/top-albums` | wrapped-style fun facts |
 | `/api/stats/artist?name=`, `/api/stats/unique-tracks`, `/api/stats/listen-time` | legacy endpoints, superseded by `summary` |
+
+Responses are gzipped (>1 KB), and the heavy read endpoints (`stats/*`, `top/*`, `history/points`, `playlists`, `forgotten`, `wrapped/*`) sit behind a 60s in-memory response cache (`x-cache: hit`) — aggregations over the ~190k-row play log take seconds on the Pi otherwise. SQLite runs in WAL mode with enlarged cache/mmap (`applySqlitePragmas`).
 
 ## Serving the frontend
 
