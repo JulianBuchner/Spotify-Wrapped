@@ -28,6 +28,7 @@ npm run dev                 # ts-node-dev with auto-reload, port 3000
 | `npm run build` | compile TypeScript → `dist/` |
 | `npm start` | run compiled `dist/server.js` (production/pm2) |
 | `npm run connect` | one-time Spotify OAuth, stores tokens in DB |
+| `npm run backfill:playlist-names` | one-off: resolve + fill missing `playlistName`s (idempotent) |
 | `npm run studio` | Prisma Studio DB browser |
 | `npm run migrate:dev` / `migrate:deploy` | create / apply migrations |
 
@@ -35,9 +36,9 @@ npm run dev                 # ts-node-dev with auto-reload, port 3000
 
 - Polls each `SpotifyAccount` on the interval; ignores anything that isn't an actively playing track.
 - Estimates the track's start time from `timestamp - progress_ms` and dedupes via an in-memory last-seen map **and** a DB check (same URI within ±60s), so restarts don't double-insert. Track restarts (seek back to start) count as a new play.
-- Records the playback **context**: `contextType` + `contextUri` straight from the API, and `playlistName` resolved via `GET /playlists/{id}?fields=name` behind an in-memory cache (24h TTL, 1h for failures). Name resolution failing (private playlist without scope, Spotify-owned algorithmic playlists, network) never blocks the insert — the name just stays `null`.
+- Records the playback **context**: `contextType` + `contextUri` straight from the API, and `playlistName` resolved via `GET /playlists/{id}?fields=name` behind an in-memory cache (24h TTL, 1h for failures). When the Web API answers 403/404 — notably Spotify-owned algorithmic/editorial playlists, which 404 since Spotify's Nov 2024 API change — resolution falls back to the public no-auth **oEmbed** endpoint (`https://open.spotify.com/oembed`). Name resolution failing entirely never blocks the insert — the name just stays `null`, and `npm run backfill:playlist-names` can fill it in later.
 
-Plays recorded before the context feature existed have `null` context columns; Spotify offers no way to backfill them.
+Plays recorded before the context feature existed have `null` context columns; Spotify offers no way to backfill *those* (the backfill script only names playlists whose URI was recorded).
 
 ## Data model (`prisma/schema.prisma`)
 
