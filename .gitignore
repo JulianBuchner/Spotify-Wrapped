@@ -8,9 +8,14 @@ dist
 !.env.production
 !.env.example
 
-# sqlite db + backups
+# sqlite db + backups (incl. WAL journals)
 *.db
+*.db-shm
+*.db-wal
 backups/
+
+# local one-off scripts (machine-specific paths)
+backend/src/scripts/importStreamingHistory.ts
 
 # logs
 *.log
