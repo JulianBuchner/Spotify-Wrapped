@@ -111,11 +111,28 @@ export async function fetchCurrentlyPlaying(accessToken: string): Promise<Curren
 }
 
 /**
+ * No-auth fallback: resolve a playlist name via Spotify's public oEmbed
+ * endpoint. Still works for Spotify-owned algorithmic/editorial playlists,
+ * which /playlists/{id} has answered with 404 since Spotify's Nov 2024 API
+ * change. Returns null on 404 (playlist gone/unresolvable).
+ */
+export async function fetchPlaylistNameOembed(playlistId: string): Promise<string | null> {
+  const res = await axios.get("https://open.spotify.com/oembed", {
+    params: { url: `https://open.spotify.com/playlist/${playlistId}` },
+    timeout: 5000,
+    validateStatus: (s) => (s >= 200 && s < 300) || s === 404,
+  });
+
+  if (res.status === 404) return null;
+  const title = (res.data as any)?.title;
+  return typeof title === "string" && title.length > 0 ? title : null;
+}
+
+/**
  * Resolve a playlist's display name via GET /playlists/{id}?fields=name.
- * Returns null when the playlist is not readable: 404 for deleted playlists
- * and for Spotify-owned algorithmic/editorial playlists (dev-mode apps),
- * 403 for playlists the token may not read (e.g. private without the
- * playlist-read-private scope).
+ * When the Web API answers 403 (private without the playlist-read-private
+ * scope) or 404 (deleted, or Spotify-owned algorithmic/editorial playlists),
+ * falls back to the public oEmbed endpoint before giving up.
  */
 export async function fetchPlaylistName(
   accessToken: string,
@@ -130,7 +147,9 @@ export async function fetchPlaylistName(
     }
   );
 
-  if (res.status === 403 || res.status === 404) return null;
+  if (res.status === 403 || res.status === 404) {
+    return fetchPlaylistNameOembed(playlistId);
+  }
   const name = (res.data as any)?.name;
   return typeof name === "string" && name.length > 0 ? name : null;
 }

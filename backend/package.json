@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "connect": "ts-node-dev --transpile-only src/connect.ts",
+    "backfill:playlist-names": "ts-node-dev --transpile-only src/scripts/backfillPlaylistNames.ts",
     "studio": "prisma studio",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy"
