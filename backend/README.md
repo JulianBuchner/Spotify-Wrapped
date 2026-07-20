@@ -66,7 +66,7 @@ All endpoints are `GET`. Most accept a date window — either `?range=today|last
 | `/api/stats/new-share` | share of streams that were first-ever plays *(playlist ✓)* |
 | `/api/stats/duration-distribution?bucketSize=15` | song-length histogram |
 | `/api/top/:entity` (`songs\|artists\|albums\|playlists`) | ranked lists, `?sort=streams\|playtime`, paginated; `?total=0` skips the costly distinct-group count *(playlist ✓ for non-playlist entities)* |
-| `/api/playlists` | distinct playlists seen, for filter dropdowns |
+| `/api/playlists` | distinct playlists seen *within the date window*, for filter dropdowns |
 | `/api/recently-played?limit=` | latest plays incl. playlist name |
 | `/api/forgotten` | high historic plays, silent for 30+ days |
 | `/api/history?q=&limit=&offset=` | paginated raw play log, searchable |

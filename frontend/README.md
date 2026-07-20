@@ -35,7 +35,7 @@ src/
     CloudView.vue           listening-cloud page (filters, point loading)
   components/
     DateRangeFilter.vue     preset segments + custom from/to
-    PlaylistFilter.vue      playlist dropdown (hidden until playlist data exists)
+    PlaylistFilter.vue      playlist dropdown — lists only playlists played in the selected timeframe; resets to "All" if the selection drops out (hidden until playlist data exists)
     StatCard.vue            KPI tile
     ChartCard.vue           card chrome: title/subtitle/actions/loading/error
     TimeSeriesChart.vue     SVG line+area chart, crosshair tooltip

@@ -1,21 +1,32 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { ref, watch } from "vue";
 import { getPlaylists } from "../api";
-import type { PlaylistInfo } from "../types";
+import type { DateWindow, PlaylistInfo } from "../types";
 
 // Model value is the playlist contextUri; "" = all playlists.
 const model = defineModel<string>({ required: true });
 
+const props = defineProps<{ window: DateWindow }>();
+
 const playlists = ref<PlaylistInfo[]>([]);
 
-onMounted(async () => {
-  try {
-    const res = await getPlaylists();
-    playlists.value = res.data;
-  } catch {
-    playlists.value = [];
-  }
-});
+watch(
+  () => props.window,
+  async (w) => {
+    try {
+      const res = await getPlaylists(w);
+      playlists.value = res.data;
+    } catch {
+      playlists.value = [];
+    }
+    // The selected playlist may not exist in the new timeframe — fall back
+    // to "all" instead of showing an empty dashboard for a stale filter.
+    if (model.value && !playlists.value.some((p) => p.playlistUri === model.value)) {
+      model.value = "";
+    }
+  },
+  { immediate: true, deep: true }
+);
 
 function label(p: PlaylistInfo) {
   return p.playlistName ?? "Unknown playlist";

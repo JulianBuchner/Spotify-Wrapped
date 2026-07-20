@@ -64,7 +64,7 @@ watch([window_, playlist], load, { deep: true });
     <div class="cloud-toolbar">
       <div class="toolbar-left">
         <DateRangeFilter v-model="window_" />
-        <PlaylistFilter v-model="playlist" />
+        <PlaylistFilter v-model="playlist" :window="window_" />
       </div>
       <div class="toolbar-right">
         <input

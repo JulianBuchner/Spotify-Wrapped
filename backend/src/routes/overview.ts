@@ -149,15 +149,21 @@ const overviewRoutes: FastifyPluginAsync = async (app) => {
     return { data, meta: { total, limit, offset } };
   });
 
-  // Distinct playlists seen in the play log (for filter dropdowns), most-played first.
-  app.get("/api/playlists", async (request) => {
+  // Distinct playlists seen in the play log (for filter dropdowns), most-played
+  // first. Honors the same date-window params as the stats endpoints so the
+  // dropdown only offers playlists actually played in the selected timeframe.
+  app.get("/api/playlists", async (request, reply) => {
     const query = request.query as Record<string, unknown>;
+    const { from, to, error } = buildPlayedAtFilter(query);
+    if (error) return reply.status(400).send({ error });
     const limit = parseLimit(query, 100, 500);
+    const conditions = playedAtConditions(from, to);
+    conditions.push(Prisma.sql`("contextType" = 'playlist' AND "contextUri" IS NOT NULL)`);
     const rows = await prisma.$queryRaw<Array<any>>`
       SELECT "contextUri" AS playlistUri, ${LATEST_PLAYLIST_NAME} AS playlistName,
              COUNT(*) AS streams
       FROM "Play"
-      WHERE "contextType" = 'playlist' AND "contextUri" IS NOT NULL
+      ${whereClause(conditions)}
       GROUP BY "contextUri"
       ORDER BY streams DESC
       LIMIT ${limit}`;

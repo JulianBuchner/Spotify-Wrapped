@@ -146,8 +146,8 @@ export function getTopPlaylists(w: DateWindow, limit = 10) {
   });
 }
 
-export function getPlaylists() {
-  return cachedGet<{ data: PlaylistInfo[] }>(STATS_TTL * 2, "/api/playlists");
+export function getPlaylists(w: DateWindow) {
+  return cachedGet<{ data: PlaylistInfo[] }>(STATS_TTL * 2, "/api/playlists", windowParams(w));
 }
 
 export function getRecentlyPlayed(limit = 12) {

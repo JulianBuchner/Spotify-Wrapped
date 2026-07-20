@@ -188,7 +188,7 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
   <div class="dashboard">
     <div class="filter-row">
       <DateRangeFilter v-model="window_" />
-      <PlaylistFilter v-model="playlist" />
+      <PlaylistFilter v-model="playlist" :window="window_" />
     </div>
 
     <div class="kpi-row">
