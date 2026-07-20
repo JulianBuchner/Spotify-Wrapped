@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { getTopAlbums, getTopArtists, getTopPlaylists, getTopSongs } from "../api";
 import { formatMs, formatNumber } from "../lib/format";
+import { latestGuard } from "../lib/latest";
 import type { DateWindow } from "../types";
 import ChartCard from "./ChartCard.vue";
 
@@ -29,12 +30,15 @@ const TABS: Array<{ value: Entity; label: string }> = [
   { value: "playlists", label: "Playlists" },
 ];
 
+const guard = latestGuard();
 async function load() {
+  const isLatest = guard();
   loading.value = true;
   error.value = null;
   try {
     if (entity.value === "songs") {
       const res = await getTopSongs(props.window, 10, props.playlist);
+      if (!isLatest()) return;
       rows.value = res.data.map((s) => ({
         key: s.spotifyUri,
         primary: s.trackName,
@@ -44,6 +48,7 @@ async function load() {
       }));
     } else if (entity.value === "artists") {
       const res = await getTopArtists(props.window, 10, props.playlist);
+      if (!isLatest()) return;
       rows.value = res.data.map((a) => ({
         key: a.artistName,
         primary: a.artistName,
@@ -53,6 +58,7 @@ async function load() {
       }));
     } else if (entity.value === "albums") {
       const res = await getTopAlbums(props.window, 10, props.playlist);
+      if (!isLatest()) return;
       rows.value = res.data.map((a) => ({
         key: a.albumName,
         primary: a.albumName,
@@ -62,6 +68,7 @@ async function load() {
       }));
     } else {
       const res = await getTopPlaylists(props.window);
+      if (!isLatest()) return;
       rows.value = res.data.map((p) => ({
         key: p.playlistUri,
         primary: p.playlistName ?? "Unknown playlist",
@@ -71,9 +78,9 @@ async function load() {
       }));
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Failed to load top list.";
+    if (isLatest()) error.value = e instanceof Error ? e.message : "Failed to load top list.";
   } finally {
-    loading.value = false;
+    if (isLatest()) loading.value = false;
   }
 }
 

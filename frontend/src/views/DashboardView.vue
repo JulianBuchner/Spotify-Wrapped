@@ -23,6 +23,7 @@ import {
   formatMsCompact,
   formatNumber,
 } from "../lib/format";
+import { latestGuard } from "../lib/latest";
 import type { DateWindow, Granularity, StatsSummary } from "../types";
 
 // Default to "today": the cheapest window (index-backed) so the first paint
@@ -87,18 +88,27 @@ const discoveryError = ref<string | null>(null);
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday first
 
+// Loads can overlap (a window change fires immediately, then the playlist
+// filter may reset asynchronously and fire again) — each loader only applies
+// the response of its latest request.
+const summaryGuard = latestGuard();
 async function loadSummary() {
+  const isLatest = summaryGuard();
   summaryLoading.value = true;
   try {
-    summary.value = (await getSummary(window_.value, playlist.value)).data;
+    const res = await getSummary(window_.value, playlist.value);
+    if (!isLatest()) return;
+    summary.value = res.data;
   } catch {
-    summary.value = null;
+    if (isLatest()) summary.value = null;
   } finally {
-    summaryLoading.value = false;
+    if (isLatest()) summaryLoading.value = false;
   }
 }
 
+const streamsGuard = latestGuard();
 async function loadStreams() {
+  const isLatest = streamsGuard();
   streamsLoading.value = true;
   streamsError.value = null;
   try {
@@ -108,65 +118,75 @@ async function loadStreams() {
       metric.value,
       playlist.value
     );
+    if (!isLatest()) return;
     streamsSeries.value = res.data.map((d) => ({
       label: formatBucket(d.bucket, granularity.value),
       // playtime arrives as ms — plot hours so the axis stays readable
       value: metric.value === "playtime" ? Math.round(d.value / 3_600_000) : d.value,
     }));
   } catch (e) {
-    streamsError.value = e instanceof Error ? e.message : "Failed to load.";
+    if (isLatest()) streamsError.value = e instanceof Error ? e.message : "Failed to load.";
   } finally {
-    streamsLoading.value = false;
+    if (isLatest()) streamsLoading.value = false;
   }
 }
 
+const clockGuard = latestGuard();
 async function loadClock() {
+  const isLatest = clockGuard();
   clockLoading.value = true;
   clockError.value = null;
   try {
     const res = await getListeningClock(window_.value, playlist.value);
+    if (!isLatest()) return;
     clockData.value = res.data.map((d) => ({
       label: `${d.hour}`,
       tooltipLabel: `${String(d.hour).padStart(2, "0")}:00–${String(d.hour).padStart(2, "0")}:59`,
       value: d.value,
     }));
   } catch (e) {
-    clockError.value = e instanceof Error ? e.message : "Failed to load.";
+    if (isLatest()) clockError.value = e instanceof Error ? e.message : "Failed to load.";
   } finally {
-    clockLoading.value = false;
+    if (isLatest()) clockLoading.value = false;
   }
 }
 
+const weekdayGuard = latestGuard();
 async function loadWeekday() {
+  const isLatest = weekdayGuard();
   weekdayLoading.value = true;
   weekdayError.value = null;
   try {
     const res = await getListeningByWeekday(window_.value, playlist.value);
+    if (!isLatest()) return;
     const byDay = new Map(res.data.map((d) => [d.weekday, d.value]));
     weekdayData.value = WEEKDAY_ORDER.map((d) => ({
       label: WEEKDAYS[d] ?? "",
       value: byDay.get(d) ?? 0,
     }));
   } catch (e) {
-    weekdayError.value = e instanceof Error ? e.message : "Failed to load.";
+    if (isLatest()) weekdayError.value = e instanceof Error ? e.message : "Failed to load.";
   } finally {
-    weekdayLoading.value = false;
+    if (isLatest()) weekdayLoading.value = false;
   }
 }
 
+const discoveryGuard = latestGuard();
 async function loadDiscovery() {
+  const isLatest = discoveryGuard();
   discoveryLoading.value = true;
   discoveryError.value = null;
   try {
     const res = await getDiscovery(window_.value, granularity.value, playlist.value);
+    if (!isLatest()) return;
     discoverySeries.value = res.data.map((d) => ({
       label: formatBucket(d.bucket, granularity.value),
       value: d.cumulative,
     }));
   } catch (e) {
-    discoveryError.value = e instanceof Error ? e.message : "Failed to load.";
+    if (isLatest()) discoveryError.value = e instanceof Error ? e.message : "Failed to load.";
   } finally {
-    discoveryLoading.value = false;
+    if (isLatest()) discoveryLoading.value = false;
   }
 }
 

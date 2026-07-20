@@ -30,6 +30,9 @@ src/
   style.css                 design tokens (CSS custom properties) for both themes
   api.ts, types.ts          typed fetch wrappers for every backend endpoint
   lib/format.ts             number/duration/date/bucket formatting, axis ticks
+  lib/latest.ts             stale-response guard: loaders only apply the result
+                            of their most recently started request (loads can
+                            overlap when the playlist filter resets async)
   views/
     DashboardView.vue       filter state + layout grid, owns all dashboard fetches
     CloudView.vue           listening-cloud page (filters, point loading)

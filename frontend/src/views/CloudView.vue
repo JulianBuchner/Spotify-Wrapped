@@ -5,6 +5,7 @@ import DateRangeFilter from "../components/DateRangeFilter.vue";
 import ListeningCloud from "../components/ListeningCloud.vue";
 import PlaylistFilter from "../components/PlaylistFilter.vue";
 import { formatNumber } from "../lib/format";
+import { latestGuard } from "../lib/latest";
 import type { DateWindow, PlayPoint } from "../types";
 
 const window_ = ref<DateWindow>({ range: "all_time", from: "", to: "" });
@@ -31,11 +32,14 @@ const errorMsg = ref<string | null>(null);
 
 const cloud = ref<InstanceType<typeof ListeningCloud> | null>(null);
 
+const guard = latestGuard();
 async function load() {
+  const isLatest = guard();
   loading.value = true;
   errorMsg.value = null;
   try {
     const res = await getHistoryPoints(window_.value, playlist.value);
+    if (!isLatest()) return;
     // columnar payload -> point objects (hour in local time, like before)
     const { t, track, artist, playlist: pl } = res.data;
     const n = t.length;
@@ -48,10 +52,12 @@ async function load() {
     }
     points.value = pts;
   } catch (e) {
-    errorMsg.value = e instanceof Error ? e.message : "Failed to load points.";
-    points.value = [];
+    if (isLatest()) {
+      errorMsg.value = e instanceof Error ? e.message : "Failed to load points.";
+      points.value = [];
+    }
   } finally {
-    loading.value = false;
+    if (isLatest()) loading.value = false;
   }
 }
 
