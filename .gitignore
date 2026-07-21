@@ -17,5 +17,10 @@ backups/
 # local one-off scripts (machine-specific paths)
 backend/src/scripts/importStreamingHistory.ts
 
+# personal Spotify data export (source for the history import)
+my_spotify_data/
+
 # logs
 *.log
+
+.claude

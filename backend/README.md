@@ -50,6 +50,7 @@ Plays recorded before the context feature existed have `null` context columns; S
 | `trackName`, `artistName`, `albumName` | denormalized display fields |
 | `playedAt`, `durationMs` | when + how long |
 | `contextType`, `contextUri`, `playlistName` | what it was played *from* |
+| `source` | `api` (poller) or `import` (Spotify Extended Streaming History export) |
 
 ## API
 
