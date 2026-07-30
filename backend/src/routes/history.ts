@@ -101,9 +101,10 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
     return sendCached(buildPointsPayload(cacheKey, from, to, playlist));
   });
 
-  // Pre-warm the default all-time window on boot and keep it fresh — the
-  // cold build costs ~10s on the Pi (SD read + stringify + gzip of 10MB),
-  // and this is the exact request CloudView makes on every visit.
+  // Pre-warm the all-time window on boot and keep it fresh — the cold build
+  // costs ~10s on the Pi (SD read + stringify + gzip of 10MB). CloudView now
+  // defaults to this_week (cheap, built lazily), but all-time stays one click
+  // away and must not take 10s when clicked.
   const PREWARM_URL = "/api/history/points?range=all_time";
   const prewarm = () => {
     try {

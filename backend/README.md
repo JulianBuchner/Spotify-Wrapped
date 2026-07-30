@@ -54,7 +54,7 @@ Plays recorded before the context feature existed have `null` context columns; S
 
 ## API
 
-All endpoints are `GET`. Most accept a date window — either `?range=today|last_week|last_30_days|ytd|last_year|all_time`, a single `?date=YYYY-MM-DD`, or explicit `?from=&to=` — and (where noted) `?playlist=<contextUri>` to scope to one playlist.
+All endpoints are `GET`. Most accept a date window — either `?range=today|this_week|previous_week|last_week|last_30_days|ytd|last_year|all_time`, a single `?date=YYYY-MM-DD`, or explicit `?from=&to=` — and (where noted) `?playlist=<contextUri>` to scope to one playlist. `this_week`/`previous_week` are Monday-based calendar weeks (server-local time); `last_week` is a rolling 7 days.
 
 | Endpoint | Returns |
 |---|---|

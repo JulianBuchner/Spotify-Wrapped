@@ -8,7 +8,7 @@ import { formatNumber } from "../lib/format";
 import { latestGuard } from "../lib/latest";
 import type { DateWindow, PlayPoint } from "../types";
 
-const window_ = ref<DateWindow>({ range: "all_time", from: "", to: "" });
+const window_ = ref<DateWindow>({ range: "this_week", from: "", to: "" });
 const playlist = ref(""); // contextUri; "" = all — note: only new plays carry context
 
 // The typed text debounces into `highlight` so the canvas doesn't recompute

@@ -6,6 +6,8 @@ const model = defineModel<DateWindow>({ required: true });
 
 const PRESETS: Array<{ value: string; label: string }> = [
   { value: "today", label: "Today" },
+  { value: "this_week", label: "This week" },
+  { value: "previous_week", label: "Last week" },
   { value: "last_week", label: "7 days" },
   { value: "last_30_days", label: "30 days" },
   { value: "ytd", label: "YTD" },

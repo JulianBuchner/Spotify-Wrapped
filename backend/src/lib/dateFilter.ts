@@ -12,11 +12,13 @@ export interface DateFilter {
 /**
  * Resolves a date window from query params. Priority:
  *   ?date=YYYY-MM-DD  ->  a single calendar day
- *   ?range=<preset>   ->  today | last_week | last_30_days | ytd | last_year | all_time
+ *   ?range=<preset>   ->  today | this_week | previous_week | last_week |
+ *                         last_30_days | ytd | last_year | all_time
  *   ?from=&to=        ->  explicit ISO range (backwards compatible)
  *
  * Rolling presets (last_week/30d/year) are pure Date math and need no timezone.
- * today / ytd / date are calendar-bound and use the SERVER's local timezone.
+ * today / this_week / previous_week / ytd / date are calendar-bound and use the
+ * SERVER's local timezone. Calendar weeks start on Monday.
  * For guaranteed IANA/DST correctness later, resolve these boundaries with luxon.
  *
  * Always returns a `filter` (empty object on error) so call sites can safely
@@ -41,6 +43,21 @@ export function buildPlayedAtFilter(query: Record<string, unknown>): DateFilter 
         from.setHours(0, 0, 0, 0);
         to = now;
         break;
+      case "this_week":
+        from = new Date(now);
+        from.setHours(0, 0, 0, 0);
+        from.setDate(from.getDate() - ((from.getDay() + 6) % 7)); // back to Monday
+        to = now;
+        break;
+      case "previous_week": {
+        const monday = new Date(now);
+        monday.setHours(0, 0, 0, 0);
+        monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+        to = new Date(monday.getTime() - 1);
+        from = new Date(monday);
+        from.setDate(from.getDate() - 7); // setDate, not -7*DAY: stays midnight across DST
+        break;
+      }
       case "last_week":
         from = new Date(now.getTime() - 7 * DAY);
         to = now;

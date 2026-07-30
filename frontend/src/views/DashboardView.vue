@@ -26,9 +26,9 @@ import {
 import { latestGuard } from "../lib/latest";
 import type { DateWindow, Granularity, StatsSummary } from "../types";
 
-// Default to "today": the cheapest window (index-backed) so the first paint
-// is instant; all-time is one click away.
-const window_ = ref<DateWindow>({ range: "today", from: "", to: "" });
+// Default to "this_week": a small index-backed window so the first paint is
+// fast; all-time is one click away.
+const window_ = ref<DateWindow>({ range: "this_week", from: "", to: "" });
 
 // Playlist contextUri filter; "" = all. Scopes every chart and list below the
 // filter row. Only plays recorded since playlist tracking went live carry
@@ -40,6 +40,8 @@ const granularity = computed<Granularity>(() => {
   const w = window_.value;
   switch (w.range) {
     case "today":
+    case "this_week":
+    case "previous_week":
     case "last_week":
     case "last_30_days":
       return "day";
