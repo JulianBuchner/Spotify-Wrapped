@@ -4,7 +4,9 @@ import { prisma } from "../db";
  * One-off repair for api rows recorded before `trackDurationMs` existed: their `durationMs`
  * holds the full track length, not the time listened. Moves the length to `trackDurationMs`
  * and caps `durationMs` by the time until the next play started (a track can't have been
- * listened to for longer than that). Plays with no later play keep their length.
+ * listened to for longer than that). A gap within 20 s of the length still counts as the full
+ * track, like the poller's end slack: the next play's start is only estimated, and crossfades
+ * shave a few seconds. Plays with no later play keep their length.
  *
  * Idempotent: only touches api rows whose `trackDurationMs` is still null.
  *
@@ -24,10 +26,11 @@ async function main() {
     UPDATE "Play" SET
       "trackDurationMs" = "durationMs",
       "durationMs" = MAX(0, MIN("durationMs", COALESCE((
-        SELECT CAST(ROUND((julianday(n."playedAt") - julianday("Play"."playedAt")) * 86400000) AS INTEGER)
-        FROM "Play" n
-        WHERE n."userId" = "Play"."userId" AND n."playedAt" > "Play"."playedAt"
-        ORDER BY n."playedAt" LIMIT 1), "durationMs")))
+        SELECT CASE WHEN gapMs >= "Play"."durationMs" - 20000 THEN "Play"."durationMs" ELSE gapMs END
+        FROM (SELECT CAST(ROUND((julianday(n."playedAt") - julianday("Play"."playedAt")) * 86400000) AS INTEGER) AS gapMs
+              FROM "Play" n
+              WHERE n."userId" = "Play"."userId" AND n."playedAt" > "Play"."playedAt"
+              ORDER BY n."playedAt" LIMIT 1)), "durationMs")))
     WHERE "source" = 'api' AND "trackDurationMs" IS NULL`;
 
   const after = await prisma.$queryRaw<Array<{ ms: number | bigint | null }>>`
