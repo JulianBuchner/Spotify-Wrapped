@@ -4,12 +4,21 @@ import type {
   BucketValue,
   DateWindow,
   DiscoveryPoint,
+  Earworm,
+  ExploreObsessYear,
   ForgottenTrack,
+  GenreArtist,
+  GenreEras,
+  GenreGroupInfo,
+  GenreLevel,
+  GenreOverTime,
+  GenreSummary,
   Granularity,
   HistoryPointsData,
   PlaylistInfo,
   RecentPlay,
   RecordHighlights,
+  SkipRateYear,
   StatsSummary,
   TopAlbum,
   TopArtist,
@@ -135,19 +144,23 @@ export function getDiscovery(w: DateWindow, granularity: Granularity, playlist?:
   });
 }
 
-export function getTopSongs(w: DateWindow, limit = 10, playlist?: string) {
+/** `sort` omitted = the backend default (streams). */
+export function getTopSongs(w: DateWindow, limit = 10, playlist?: string, sort?: Metric) {
   return cachedGet<{ data: TopSong[] }>(STATS_TTL, "/api/top/songs", {
     ...windowParams(w, playlist),
     limit,
     total: 0,
+    sort,
   });
 }
 
-export function getTopArtists(w: DateWindow, limit = 10, playlist?: string) {
+/** `sort` omitted = the backend default (streams). */
+export function getTopArtists(w: DateWindow, limit = 10, playlist?: string, sort?: Metric) {
   return cachedGet<{ data: TopArtist[] }>(STATS_TTL, "/api/top/artists", {
     ...windowParams(w, playlist),
     limit,
     total: 0,
+    sort,
   });
 }
 
@@ -228,4 +241,90 @@ export function getRecordHighlights(w: DateWindow, playlist?: string) {
 
 export function getWearOut(w: DateWindow, playlist?: string) {
   return cachedGet<{ data: WearOut }>(STATS_TTL, "/api/record/wear-out", windowParams(w, playlist));
+}
+
+export function getEarworms(w: DateWindow, limit = 6, playlist?: string) {
+  return cachedGet<{ data: Earworm[] }>(STATS_TTL, "/api/record/earworms", {
+    ...windowParams(w, playlist),
+    limit,
+  });
+}
+
+export function getSkipRateByYear(w: DateWindow, playlist?: string) {
+  return cachedGet<{ data: SkipRateYear[] }>(
+    STATS_TTL,
+    "/api/record/skip-rate-by-year",
+    windowParams(w, playlist)
+  );
+}
+
+export function getExploreObsess(w: DateWindow, metric: Metric = "playtime", playlist?: string) {
+  return cachedGet<{ data: ExploreObsessYear[] }>(STATS_TTL, "/api/record/explore-obsess", {
+    ...windowParams(w, playlist),
+    metric,
+  });
+}
+
+// --- Eras / Genres routes ----------------------------------------------------
+
+export function getGenreSummary(w: DateWindow, playlist?: string) {
+  return cachedGet<{ data: GenreSummary }>(STATS_TTL, "/api/genres/summary", windowParams(w, playlist));
+}
+
+/** `level` only applies to `by = "group"` (group vs. broad rows); it is not sent for genre rows. */
+export function getGenreOverTime(
+  w: DateWindow,
+  granularity: Granularity,
+  by: "group" | "genre" = "group",
+  level: GenreLevel = "group",
+  top = 30,
+  metric: Metric = "playtime",
+  playlist?: string
+) {
+  return cachedGet<{ data: GenreOverTime }>(STATS_TTL, "/api/genres/over-time", {
+    ...windowParams(w, playlist),
+    granularity,
+    by,
+    level: by === "group" ? level : undefined,
+    top,
+    metric,
+  });
+}
+
+export function getGenreEras(
+  w: DateWindow,
+  metric: Metric = "playtime",
+  level: GenreLevel = "group",
+  playlist?: string
+) {
+  return cachedGet<{ data: GenreEras }>(STATS_TTL, "/api/genres/eras", {
+    ...windowParams(w, playlist),
+    metric,
+    level,
+  });
+}
+
+/**
+ * Exactly one of `group` (a group key — a broad key when `level` is "broad")
+ * or `genre` (genre name). `level` defaults to "group" and is only sent with `group`.
+ */
+export function getGenreArtists(
+  w: DateWindow,
+  what: { group?: string; genre?: string; level?: GenreLevel },
+  limit = 10,
+  metric: Metric = "playtime",
+  playlist?: string
+) {
+  return cachedGet<{ data: GenreArtist[] }>(STATS_TTL, "/api/genres/artists", {
+    ...windowParams(w, playlist),
+    group: what.group,
+    level: what.group !== undefined ? (what.level ?? "group") : undefined,
+    genre: what.genre,
+    limit,
+    metric,
+  });
+}
+
+export function getGenreGroups(w: DateWindow, playlist?: string) {
+  return cachedGet<{ data: GenreGroupInfo }>(STATS_TTL, "/api/genres/groups", windowParams(w, playlist));
 }

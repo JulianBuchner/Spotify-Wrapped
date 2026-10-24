@@ -12,6 +12,7 @@ dist
 *.db
 *.db-shm
 *.db-wal
+*.enrich.lock
 backups/
 
 # local one-off scripts (machine-specific paths)

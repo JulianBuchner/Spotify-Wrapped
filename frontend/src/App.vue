@@ -37,6 +37,8 @@ onMounted(async () => {
       <RouterLink to="/" class="tab" exact-active-class="tab-active">Dashboard</RouterLink>
       <RouterLink to="/cloud" class="tab" active-class="tab-active">Listening Cloud</RouterLink>
       <RouterLink to="/record" class="tab" active-class="tab-active">Record</RouterLink>
+      <RouterLink to="/eras" class="tab" active-class="tab-active">Eras</RouterLink>
+      <RouterLink to="/genres" class="tab" active-class="tab-active">Genres</RouterLink>
     </nav>
 
     <div class="header-right">

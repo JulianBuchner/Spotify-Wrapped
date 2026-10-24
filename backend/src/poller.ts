@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { pendingTrackIds } from "./catalog";
 import {
   ensureAccessToken,
   fetchCurrentlyPlaying,
@@ -222,6 +223,17 @@ async function pollOneAccount(accountId: string) {
   const seen = lastSeenByAccount.get(accountId);
   if (seen && seen.uri === track.uri && seen.startMs === startMs) {
     lastSeenByAccount.set(accountId, { ...seen, playId: created.id });
+  }
+
+  // Genre catalog: a track we have no metadata for yet is picked up by the server's
+  // 10-minute enrichment timer (see catalog.ts). Never blocks the insert.
+  if (track.id) {
+    try {
+      const known = await prisma.track.findUnique({ where: { spotifyId: track.id }, select: { spotifyId: true } });
+      if (!known) pendingTrackIds.add(track.id);
+    } catch (err) {
+      console.error(`[poller] Failed to check catalog for track ${track.id}`, err);
+    }
   }
 
   // Optional: reuse lastAfterMs as "last inserted start time" (not required, but harmless)

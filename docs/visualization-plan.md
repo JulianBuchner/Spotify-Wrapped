@@ -59,7 +59,9 @@ Backend: `backend/src/routes/record.ts` (week-hour-grid, streams-by-artist, top-
 | **My #1 artist, year by year** | yearly variant of `/api/wrapped/top-artist-per-month` (ROW_NUMBER already there). Simple colored bar strip. | A, must, S |
 | Stat tiles: longest streak, longest session, first play, biggest day | SQL: consecutive-day runs; sessions = gaps ≤ 20 min; max `SUM(durationMs)` per day; `MIN(playedAt)`. | A, S |
 
-### 2b. `/eras` — "Twelve years … how my taste moved in eras" (post 2)
+### 2b. `/eras` — "Twelve years … how my taste moved in eras" (post 2) — built 2026-10-24 on `feat/genres`
+
+`ErasView.vue` + `GenreStreamgraph.vue` (Gaussian-smoothed, expand-stacked, monotone curves, era header + in-band peak labels), `MultiLineChart.vue`, `BarList.vue`, `EarwormList.vue`; stat strip from `/api/record/{earworms,skip-rate-by-year,highlights}` + top song. Hours/Streams toggle.
 
 | Panel | Data / approach | Class |
 |---|---|---|
@@ -71,7 +73,9 @@ Backend: `backend/src/routes/record.ts` (week-hour-grid, streams-by-artist, top-
 | When I listen heatmap | shared `HeatmapGrid.vue` from 2a. | A, S |
 | Podcasts vs music | dropped: only 96 podcast rows exist in the export, none in the DB. | — |
 
-### 2c. `/genres` — "Genre listen frequency" (post 4)
+### 2c. `/genres` — "Genre listen frequency" (post 4) — built 2026-10-24 on `feat/genres`
+
+`GenresView.vue` + `GenreStripPlot.vue` (always-dark panel, rainbow rows, intensity = value/rowMax^0.7, click → top artists), Genres|Groups|Broad and Streams|Hours toggles, Coverage card with the unmapped lists for tuning `genreGroups.ts`. Groups have two levels (18 detailed groups with a `parent` each, 8 broad parents; `?level=broad`); hypertechno and German rap / German pop & indie are own groups since the owner's review.
 
 Post 4 (u/Poa_Alpina, repo <https://github.com/Conchobhar/spotify-unwrapped>): rows = ~30 genre
 clusters, x = time, every listen a semi-transparent dot so density becomes color intensity, rows
@@ -84,7 +88,14 @@ list → k-means into ~30 clusters → cluster named by its two most-listened ge
 | Genre shares per year (small multiples or a 100 % bar per year) | same table as the streamgraph. | C, S |
 | "Genre of the hour" (optional): weekday×hour grid per genre | reuse `HeatmapGrid.vue`. | C, S |
 
-## 3. Genres: how to get them into the Wrapped
+## 3. Genres: how to get them into the Wrapped — backend built 2026-10-24 on `feat/genres`
+
+Status: steps 1, 2, 4 (both layers) and 6 are done (`backend/src/catalog.ts`,
+`backend/src/data/genreGroups.ts`, `backend/src/routes/genres.ts`, see the backend README
+"Genres" section); step 3 only in its manual-override half (`ARTIST_OVERRIDES` in
+`genreGroups.ts`, no MusicBrainz yet); step 5 reached: 86.6 % of all-time listening mapped on
+the local copy (rules alone 74.0 % = everything Spotify has genres for; 40 name overrides add
+the rest). Frontend views still open.
 
 **Verified today with your app's token**: `GET /artists/{id}` and the bulk `GET /artists?ids=`
 still return `genres` (4 of your top 5 artists had them; Alan Walker came back empty). Spotify
@@ -97,15 +108,18 @@ Pipeline (backend job, runs on the Pi where the token lives):
 1. New tables `Track` (`spotifyId` PK, `artistIds` JSON, `albumName`, `releaseDate`,
    `durationMs`, `imageUrl`, `fetchedAt`) and `Artist` (`spotifyId` PK, `name`, `genres` JSON,
    `imageUrl`, `popularity`, `fetchedAt`). No change to `Play`; joins go `Play.spotifyId → Track →
-   Artist` (primary artist).
-2. `npm run enrich:catalog`: distinct `spotifyId` → `GET /tracks?ids=` (50 per call ≈ 282 calls)
+   Artist` (primary artist). ✅ done (migration `add_catalog`; `Track` also has `name` +
+   `primaryArtistId`, `Artist` has `group`).
+2. ✅ done — `npm run enrich:catalog`: distinct `spotifyId` → `GET /tracks?ids=` (50 per call ≈ 282 calls)
    → distinct artist ids → `GET /artists?ids=` (≈ 120 calls). Minutes, well inside the rate limit;
    idempotent (skips rows with `fetchedAt`). The poller calls the same code for new tracks, so
-   the catalog stays current.
-3. Fallback for artists with empty genres: MusicBrainz artist tags by name (free, no key,
+   the catalog stays current. (Actual first run: 291 + 94 calls, ~2.5 min, no 429s; the poller
+   queues new ids and the server drains them every 10 min.)
+3. ⏳ partly — only the manual overrides exist (`ARTIST_OVERRIDES` in `genreGroups.ts`, 40
+   names); no MusicBrainz fallback yet. Fallback for artists with empty genres: MusicBrainz artist tags by name (free, no key,
    1 req/s, only for the top ~500 uncovered) plus a small manual override file
    (`backend/src/data/genreOverrides.ts`), e.g. Alan Walker → edm.
-4. **Grouping** — two layers, both needed:
+4. ✅ done (16 groups, `by=group` / `by=genre` on the over-time endpoint). **Grouping** — two layers, both needed:
    - **Groups (~12–15)** for the Eras streamgraph, like post 2's "Dream pop & indie pop" bands:
      rule table `genreGroups.ts` mapping Spotify micro-genres to a group by keyword/priority
      (e.g. `hardstyle|rawstyle|hardcore|frenchcore → Hardstyle`, `big room|edm|progressive house →
@@ -116,11 +130,14 @@ Pipeline (backend job, runs on the Pi where the token lives):
      play counts for every genre of its artist (post 4's approach). Optional toggle to show the
      groups instead. Automatic clustering (word2vec + k-means) is possible later in a Python
      one-off, but the raw top-30 already reads like post 4's rows for one person's data.
-5. Coverage target: ≥ 85 % of listened time mapped (post 2 managed 68 % by hand). The streamgraph
-   shows shares of covered time and the footer states the coverage, as post 2 did.
-6. Endpoints: `/api/genres/over-time?granularity=month&by=group|genre`, `/api/genres/eras`,
-   `/api/genres/summary`. Behind the existing 60 s cache prefix; the monthly table can also be
-   precomputed on enrich since it only changes with new plays.
+5. ✅ reached (86.6 % local). Coverage target: ≥ 85 % of listened time mapped (post 2 managed
+   68 % by hand). The streamgraph shows shares of covered time and the footer states the coverage
+   (`/api/genres/summary` → `coverage.share`), as post 2 did.
+6. ✅ done — endpoints: `/api/genres/over-time?granularity=month&by=group|genre`, `/api/genres/eras`,
+   `/api/genres/summary`, plus `/api/genres/artists` (tooltips) and `/api/genres/groups` (rule
+   table). Behind the existing 60 s cache prefix; no precomputed monthly table was needed
+   (all_time `by=genre` ≈ 1.3–1.5 s locally after aggregating per artist before `json_each`,
+   `by=group` ≈ 0.6 s; ≈ 4× that on the Pi, served from the 60 s cache after the first hit).
 
 ## 4. Design rules for the new views
 

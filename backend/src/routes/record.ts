@@ -8,6 +8,7 @@ import {
 } from "../lib/dateFilter";
 import { num, playlistCondition } from "../lib/query";
 import { readOnlyDb } from "../lib/rawDb";
+import { denseBuckets } from "../lib/buckets";
 
 // ---------------------------------------------------------------------------
 // /api/record/* — the data behind the "Record" view (one ring per day vinyl
@@ -131,18 +132,36 @@ function scanSessionAndEarworm(where: { sql: string; params: unknown[] }) {
   }
   closeSession();
 
-  let earworm: { uri: string; at: number; plays: number } | null = null;
+  // best 7-day window per track (two-pointer sweep, plays are ascending)
+  const earworms: Array<{ uri: string; at: number; plays: number }> = [];
   for (const [uri, ts] of byUri) {
-    if (earworm && ts.length <= earworm.plays) continue; // cannot beat it
+    let best = { uri, at: ts[0]!, plays: 0 };
     let j = 0;
     for (let i = 0; i < ts.length; i++) {
       const limit = ts[i]! + EARWORM_WINDOW_MS;
       while (j < ts.length && ts[j]! <= limit) j++;
-      if (!earworm || j - i > earworm.plays) earworm = { uri, at: ts[i]!, plays: j - i };
+      if (j - i > best.plays) best = { uri, at: ts[i]!, plays: j - i };
     }
+    if (best.plays > 0) earworms.push(best);
   }
+  earworms.sort((a, b) => b.plays - a.plays || a.at - b.at);
   // TS narrows `session` to null (it is only assigned inside closeSession)
-  return { session: session as Session | null, earworm };
+  return { session: session as Session | null, earworm: earworms[0] ?? null, earworms };
+}
+
+/** Track + artist names for a list of URIs (latest names win). */
+async function namesForUris(uris: string[]): Promise<Map<string, { trackName: string; artistName: string }>> {
+  const out = new Map<string, { trackName: string; artistName: string }>();
+  if (!uris.length) return out;
+  const rows = await prisma.$queryRaw<Array<any>>`
+    SELECT "spotifyUri" AS uri, "trackName" AS trackName, "artistName" AS artistName
+    FROM (
+      SELECT "spotifyUri", "trackName", "artistName",
+             ROW_NUMBER() OVER (PARTITION BY "spotifyUri" ORDER BY "playedAt" DESC) AS rn
+      FROM "Play" WHERE "spotifyUri" IN (${Prisma.join(uris)})
+    ) WHERE rn = 1`;
+  for (const r of rows) out.set(String(r.uri), { trackName: r.trackName, artistName: r.artistName });
+  return out;
 }
 
 /** Local calendar date (YYYY-MM-DD, server TZ) of an epoch ms — matches SQLite's date(..., 'localtime'). */
@@ -206,20 +225,15 @@ const recordRoutes: FastifyPluginAsync = async (app) => {
       FROM "Play" ${where}
       GROUP BY bucket, artistName ORDER BY bucket`;
 
-    const bucketIndex = new Map<string, number>();
-    const buckets: string[] = [];
-    for (const r of rows) {
-      const b = String(r.bucket);
-      if (!bucketIndex.has(b)) {
-        bucketIndex.set(b, buckets.length);
-        buckets.push(b);
-      }
-    }
+    // dense buckets (empty ones included) so the time axis keeps its gaps
+    const buckets = await denseBuckets(fmt, where);
+    const bucketIndex = new Map<string, number>(buckets.map((b, i) => [b, i]));
     const artistIndex = new Map<string, number>(artists.map((a, i) => [a, i]));
     const values: number[][] = artists.map(() => new Array<number>(buckets.length).fill(0));
     const other: number[] = new Array<number>(buckets.length).fill(0);
     for (const r of rows) {
-      const bi = bucketIndex.get(String(r.bucket))!;
+      const bi = bucketIndex.get(String(r.bucket));
+      if (bi === undefined) continue;
       const ai = artistIndex.get(String(r.artistName));
       if (ai === undefined) other[bi] += num(r.value);
       else values[ai]![bi] += num(r.value);
@@ -326,6 +340,94 @@ const recordRoutes: FastifyPluginAsync = async (app) => {
           : null,
         earworm: earwormOut,
       },
+    };
+  });
+
+  // The worst earworms: tracks ranked by their best 7-day window.
+  app.get("/api/record/earworms", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const { from, to, error } = buildPlayedAtFilter(query);
+    if (error) return reply.status(400).send({ error });
+    const limit = parseInt_(query.limit, 6, 1, 50);
+    const { earworms } = scanSessionAndEarworm(rawScopedWhere(query, from, to));
+    const top = earworms.slice(0, limit);
+    const names = await namesForUris(top.map((e) => e.uri));
+    return {
+      data: top.map((e) => ({
+        spotifyUri: e.uri,
+        trackName: names.get(e.uri)?.trackName ?? "",
+        artistName: names.get(e.uri)?.artistName ?? "",
+        plays: e.plays,
+        weekStart: localDate(e.at),
+      })),
+    };
+  });
+
+  // Share of plays skipped (< 30 s) per calendar year.
+  app.get("/api/record/skip-rate-by-year", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const { from, to, error } = buildPlayedAtFilter(query);
+    if (error) return reply.status(400).send({ error });
+    const where = scopedWhere(query, from, to);
+    const rows = await prisma.$queryRaw<Array<any>>`
+      SELECT CAST(strftime('%Y', "playedAt", 'localtime') AS INTEGER) AS year,
+             COUNT(*) AS plays,
+             SUM(CASE WHEN "durationMs" < ${SKIP_MS} THEN 1 ELSE 0 END) AS skips
+      FROM "Play" ${where}
+      GROUP BY year ORDER BY year`;
+    return {
+      data: rows.map((r) => {
+        const plays = num(r.plays);
+        const skips = num(r.skips);
+        return { year: num(r.year), plays, skips, skipRate: plays ? Math.round((skips / plays) * 10000) / 10000 : 0 };
+      }),
+    };
+  });
+
+  // "Explore, then obsess": per calendar year, the share of listening on artists
+  // first heard that year (over the WHOLE history, so an old favourite never
+  // counts as new) versus the share on the year's own top-10 artists.
+  app.get("/api/record/explore-obsess", async (request, reply) => {
+    const query = request.query as Record<string, unknown>;
+    const { from, to, error } = buildPlayedAtFilter(query);
+    if (error) return reply.status(400).send({ error });
+    const where = scopedWhere(query, from, to);
+    const metric = metricExpr(query);
+
+    const rows = await prisma.$queryRaw<Array<any>>`
+      WITH firstYear AS (
+        SELECT "artistName", CAST(strftime('%Y', MIN("playedAt"), 'localtime') AS INTEGER) AS fy
+        FROM "Play" GROUP BY "artistName"
+      ),
+      perArtist AS (
+        SELECT CAST(strftime('%Y', p."playedAt", 'localtime') AS INTEGER) AS year,
+               p."artistName" AS artistName,
+               ${metric} AS value
+        FROM "Play" p ${where}
+        GROUP BY year, p."artistName"
+      ),
+      ranked AS (
+        SELECT pa.year, pa.artistName, pa.value,
+               ROW_NUMBER() OVER (PARTITION BY pa.year ORDER BY pa.value DESC, pa.artistName ASC) AS rn,
+               (f.fy = pa.year) AS isNew
+        FROM perArtist pa JOIN firstYear f ON f."artistName" = pa.artistName
+      )
+      SELECT year,
+             SUM(value) AS total,
+             SUM(CASE WHEN isNew THEN value ELSE 0 END) AS newValue,
+             SUM(CASE WHEN rn <= 10 THEN value ELSE 0 END) AS top10Value
+      FROM ranked GROUP BY year ORDER BY year`;
+    return {
+      data: rows.map((r) => {
+        const total = num(r.total);
+        const share = (v: number) => (total ? Math.round((v / total) * 10000) / 10000 : 0);
+        return {
+          year: num(r.year),
+          total,
+          newArtistShare: share(num(r.newValue)),
+          top10Share: share(num(r.top10Value)),
+        };
+      }),
     };
   });
 

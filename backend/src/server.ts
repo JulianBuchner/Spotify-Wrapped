@@ -7,6 +7,7 @@ import fs from "fs";
 import dotenv from "dotenv";
 import { Prisma } from "@prisma/client";
 import { pollAllUsersOnce } from "./poller";
+import { runEnrichment } from "./catalog";
 import { prisma, applySqlitePragmas } from "./db";
 import { buildPlayedAtFilter } from "./lib/dateFilter";
 import searchRoutes from "./routes/search";
@@ -16,6 +17,7 @@ import wrappedRoutes from "./routes/wrapped";
 import recordRoutes from "./routes/record";
 import historyRoutes from "./routes/history";
 import detailRoutes from "./routes/detail";
+import genresRoutes from "./routes/genres";
 
 dotenv.config();
 
@@ -46,7 +48,7 @@ async function main() {
   const CACHE_TTL_MS = 60_000;
   const CACHE_MAX_ENTRIES = 200;
   // history/points manages its own cache (pre-gzipped payloads) in its route
-  const CACHEABLE = /^\/api\/(stats\/|top\/|playlists|forgotten|wrapped\/|record\/)/;
+  const CACHEABLE = /^\/api\/(stats\/|top\/|playlists|forgotten|wrapped\/|record\/|genres\/)/;
   const responseCache = new Map<string, { body: string; at: number }>();
 
   app.addHook("onRequest", async (request, reply) => {
@@ -93,6 +95,7 @@ async function main() {
   await app.register(statsRoutes);
   await app.register(wrappedRoutes);
   await app.register(recordRoutes);
+  await app.register(genresRoutes);
   await app.register(historyRoutes);
   await app.register(detailRoutes);
 
@@ -214,6 +217,14 @@ async function main() {
   setInterval(() => {
     pollAllUsersOnce().catch((err) => app.log.error(err));
   }, POLL_SECONDS * 1000);
+
+  // Genre catalog (Track/Artist tables): a full catch-up run 60 s after boot — cheap
+  // when nothing is missing — then every 10 min only the ids the poller queued.
+  // runEnrichment never throws.
+  const ENRICH_BOOT_DELAY_MS = 60_000;
+  const ENRICH_INTERVAL_MS = 10 * 60_000;
+  setTimeout(() => void runEnrichment("full"), ENRICH_BOOT_DELAY_MS);
+  setInterval(() => void runEnrichment("pending"), ENRICH_INTERVAL_MS);
 }
 
 main().catch((err) => {

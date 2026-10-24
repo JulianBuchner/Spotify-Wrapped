@@ -69,3 +69,35 @@ model Play {
   @@index([contextUri]) // playlist grouping + ?playlist= filters
   @@unique([userId, playedAt, spotifyUri]) // prevents duplicates cleanly
 }
+
+// ---------------------------------------------------------------------------
+// Catalog: Spotify track/artist metadata fetched once by `npm run enrich:catalog`
+// (and kept current by the server for new plays). Plays never change; joins go
+// Play.spotifyId -> Track.spotifyId -> Artist(primaryArtistId).
+// ---------------------------------------------------------------------------
+
+model Track {
+  spotifyId       String   @id // Play.spotifyId joins here
+  name            String
+  primaryArtistId String? // artists[0].id — the one the genre comes from
+  artistIds       String // JSON array of artist ids in Spotify's order
+  albumName       String?
+  releaseDate     String? // as Spotify gives it: YYYY, YYYY-MM or YYYY-MM-DD
+  durationMs      Int?
+  imageUrl        String? // album image, the 300px one if present
+  fetchedAt       DateTime @default(now())
+
+  @@index([primaryArtistId])
+}
+
+model Artist {
+  spotifyId  String   @id
+  name       String
+  genres     String // JSON array of strings as returned (may be [])
+  group      String? // readable group from the rule table, null = unmapped
+  imageUrl   String?
+  popularity Int?
+  fetchedAt  DateTime @default(now())
+
+  @@index([group])
+}

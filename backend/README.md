@@ -30,6 +30,7 @@ npm run dev                 # ts-node-dev with auto-reload, port 3000
 | `npm run connect` | one-time Spotify OAuth, stores tokens in DB |
 | `npm run backfill:playlist-names` | one-off: resolve + fill missing `playlistName`s (idempotent) |
 | `npm run backfill:api-durations` | one-off after the 2026-10-24 duration fix: moves the track length of old api rows to `trackDurationMs` and caps `durationMs` by the gap to the next play (idempotent) |
+| `npm run enrich:catalog` | fills the `Track`/`Artist` catalog from Spotify for every play and assigns genre groups, then prints the coverage report (idempotent + resumable: only missing rows are fetched). Flags: `-- --reassign` re-runs the rules in `src/data/genreGroups.ts` for **all** artists (after editing the rule table), `-- --refresh` also refetches artists older than 90 days. Takes a lock file (`dev.db.enrich.lock`) so it never runs beside the server's own enrichment |
 | `npm run studio` | Prisma Studio DB browser |
 | `npm run migrate:dev` / `migrate:deploy` | create / apply migrations |
 
@@ -53,6 +54,16 @@ Plays recorded before the context feature existed have `null` context columns; S
 | `trackDurationMs` | full track length, api rows only |
 | `contextType`, `contextUri`, `playlistName` | what it was played *from* |
 | `source` | `api` (poller) or `import` (Spotify Extended Streaming History export) |
+
+Catalog tables filled by `npm run enrich:catalog` (and kept current by the server, see [Genres](#genres)). `Play` rows never change; joins go `Play.spotifyId → Track.spotifyId → Artist(Track.primaryArtistId)`:
+
+| Table / column | Meaning |
+|---|---|
+| `Track.spotifyId` (PK), `name`, `albumName`, `releaseDate`, `durationMs`, `imageUrl` | track metadata from `GET /tracks?ids=`; `releaseDate` as Spotify gives it (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`), `imageUrl` = the 300 px album image |
+| `Track.primaryArtistId`, `artistIds` | `artists[0].id` (the artist whose genres count for the play) and the full id list as a JSON array. A track Spotify no longer knows is stored with `primaryArtistId = null`, `artistIds = '[]'` and the play's `trackName`, so it is not refetched every run |
+| `Artist.spotifyId` (PK), `name`, `genres`, `imageUrl`, `popularity` | from `GET /artists?ids=`; `genres` is the JSON array exactly as returned (may be `[]`) |
+| `Artist.group` | readable genre group from the rule table (`src/data/genreGroups.ts`), `null` = unmapped |
+| `fetchedAt` (both) | when the row was fetched; `--refresh` refetches artists older than 90 days |
 
 ## API
 
@@ -81,10 +92,50 @@ All endpoints are `GET`. Most accept a date window — either `?range=today|this
 | `/api/record/streams-by-artist?granularity=day\|week\|month\|year&top=10&metric=streams\|playtime` | top-N artists (1–20) as one series each over time plus `other`; `values[artist][bucket]` *(playlist ✓)* |
 | `/api/record/top-artist-per-year?metric=streams|playtime` | #1 artist per calendar year (local) by streams or listening time *(playlist ✓)* |
 | `/api/record/highlights` | longest streak of listening days, longest session (20-min gap rule), biggest day, first play, worst earworm (most plays of one track within 7 days); each `null` when the window is empty *(playlist ✓)* |
+| `/api/record/earworms?limit=6` | tracks ranked by their best 7-day window (plays, weekStart) *(playlist ✓)* |
+| `/api/record/skip-rate-by-year` | plays, skips (< 30 s) and skip rate per calendar year *(playlist ✓)* |
+| `/api/record/explore-obsess?metric=playtime|streams` | per year: share on artists first heard that year vs. on the year's top-10 artists *(playlist ✓)* |
 | `/api/record/wear-out?maxPlay=30&minPlays=8` | skip rate (< 30 s listened) by nth play of a song; plays are numbered over the whole history, thin trailing steps (< 20 plays) are pooled into the last one *(playlist ✓)* |
+| `/api/genres/summary` | catalog health + coverage: artists/tracks counts, `coverage { ms, mappedMs, share, plays, playsWithoutTrack }` for the window, `lastFetchedAt`, top-20 `unmappedGenres` and `unmappedArtists` (with their genres) by listened time *(playlist ✓)* |
+| `/api/genres/over-time?level=group|broad&granularity=day\|week\|month\|year&by=group\|genre&top=30&metric=streams\|playtime` | time series per genre group (`by=group`, one group per play = its primary artist's, all groups as rows sorted by total) or per raw Spotify genre (`by=genre`, a play counts once for **every** genre of its primary artist, so the sums exceed the play count; top 1–100 genres as rows). `values[row][bucket]` dense, buckets ascending (UTC); `unmapped[bucket]` = plays without a group / without genres, in the metric's unit *(playlist ✓)* |
+| `/api/genres/eras?level=group|broad&metric=streams\|playtime` | per calendar year (local): `total` of **mapped** listening, `shares { [groupKey]: 0..1 }` of it, `unmapped`; `groups` with totals; `eras` = runs of consecutive full years (≥ 10 % of the busiest year) with the same dominant group, with `peakYear`/`peakShare` *(playlist ✓)* |
+| `/api/genres/artists?level=group|broad&group=<key>\|genre=<name>&limit=10&metric=streams\|playtime` | top artists (catalog names) of one group or one raw genre in the window, with their genres — for tooltips; 400 without `group`/`genre` *(playlist ✓)* |
+| `/api/genres/groups` | the rule table (`key`, `label`, `parent`, `match` regex source) plus the `broad` parent list (stable colour order) with artists per group (global) and `ms`/`streams` in the window, the overrides count, and the same for `unmapped` *(playlist ✓)* |
 | `/api/stats/artist?name=`, `/api/stats/unique-tracks`, `/api/stats/listen-time` | legacy endpoints, superseded by `summary` |
 
-Responses are gzipped (>1 KB), and the heavy read endpoints (`stats/*`, `top/*`, `history/points`, `playlists`, `forgotten`, `wrapped/*`, `record/*`) sit behind a 60s in-memory response cache (`x-cache: hit`) — aggregations over the ~190k-row play log take seconds on the Pi otherwise. SQLite runs in WAL mode with enlarged cache/mmap (`applySqlitePragmas`).
+Responses are gzipped (>1 KB), and the heavy read endpoints (`stats/*`, `top/*`, `history/points`, `playlists`, `forgotten`, `wrapped/*`, `record/*`, `genres/*`) sit behind a 60s in-memory response cache (`x-cache: hit`) — aggregations over the ~190k-row play log take seconds on the Pi otherwise. SQLite runs in WAL mode with enlarged cache/mmap (`applySqlitePragmas`).
+
+## Genres
+
+Spotify only exposes genres **per artist**, through the `genres` field of `GET /artists` — a field
+Spotify marks deprecated (it still answers today, but sparsely: some well-known artists come back
+with `[]`). So the catalog fetches it once and **stores** it; nothing reads genres live.
+
+- **Pipeline** (`src/catalog.ts`, `enrichCatalog`): distinct `Play.spotifyId` without a `Track` row →
+  `GET /tracks?ids=` (50 per call) → distinct `Track.primaryArtistId` without an `Artist` row →
+  `GET /artists?ids=` → `assignGroups()`. Secondary artists (`artistIds[1..]`) are only fetched when
+  fewer than 1,000 are missing; they are not used for grouping. Calls are paced at ~150 ms, HTTP 429
+  honours `Retry-After` (max 5 tries). A play's genres are those of its track's **primary** artist.
+- **Kept current by the server**: the poller queues the id of every inserted play whose track is not
+  in the catalog yet (`pendingTrackIds`); `server.ts` drains that set every 10 min with the same code
+  path, and runs a full catch-up 60 s after boot (cheap when nothing is missing). Failures are logged,
+  never fatal. The script and the server share a lock file so they never fetch side by side.
+- **Grouping** (`src/data/genreGroups.ts`): `GENRE_GROUPS` is an ordered list of
+  `{ key, label, match: RegExp }` — the **first** rule whose regex matches **any** of the artist's
+  genres wins, so specific rules go first and the catch-alls (`electronic|dance`, …) last.
+  `ARTIST_OVERRIDES` maps artist **names** to a group key for artists whose Spotify genres are empty
+  or misleading; an override always beats the rules. One group per artist, so the Eras shares add up
+  to 100 % of mapped time.
+- **Two levels**: every rule has a `parent` in `BROAD_GROUPS` (hardstyle, EDM & dance, techno & house,
+  bass, hip hop, pop & Schlager, rock & indie, other). The stored `Artist.group` is always the detailed
+  key; `?level=broad` on `over-time`, `eras` and `artists` maps it to the parent at query time, so
+  switching levels needs no reassignment. Adding a group = one rule with a parent, then `--reassign`.
+- **Tuning**: edit the rule table or the overrides, run `npm run enrich:catalog -- --reassign` (re-runs
+  `groupForArtist` for every artist and rewrites `Artist.group`), and read the coverage report it
+  prints — or `GET /api/genres/summary` — for the share of listened time that has a group plus the top
+  unmapped genres and artists. Target: ≥ 85 % of all-time listening mapped. Only artists that are
+  reachable through a `Track` row can be grouped; plays whose track Spotify no longer knows stay
+  unmapped (`playsWithoutTrack` in the summary).
 
 ## Serving the frontend
 

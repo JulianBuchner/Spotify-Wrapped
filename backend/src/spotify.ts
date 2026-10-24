@@ -160,3 +160,101 @@ export async function fetchMe(accessToken: string) {
   });
   return res.data as { id: string; display_name?: string };
 }
+
+// ---------------------------------------------------------------------------
+// Catalog lookups (bulk tracks/artists) for the genre enrichment. Both honour
+// Spotify's 429 + Retry-After (development-mode apps get a rolling 30 s
+// window) and skip ids Spotify answers null for (unknown/removed ids).
+// ---------------------------------------------------------------------------
+
+export type SpotifyTrackMeta = {
+  id: string;
+  name: string;
+  artists: { id: string; name: string }[];
+  albumName: string | null;
+  releaseDate: string | null; // YYYY, YYYY-MM or YYYY-MM-DD as Spotify gives it
+  durationMs: number | null;
+  imageUrl: string | null; // album image, the 300px one if present
+};
+
+export type SpotifyArtistMeta = {
+  id: string;
+  name: string;
+  genres: string[]; // deprecated field: may be [] even for well-known artists
+  imageUrl: string | null;
+  popularity: number | null;
+};
+
+/** Counters for the enrichment report (how often Spotify throttled us). */
+export const spotifyStats = { rateLimited: 0 };
+
+const MAX_TRIES = 5;
+const DEFAULT_RETRY_AFTER_S = 5;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** GET with bearer auth; on 429 waits Retry-After seconds (default 5) and retries up to MAX_TRIES. */
+async function getWithRetry(url: string, accessToken: string, params: Record<string, string>): Promise<any> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await axios.get(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params,
+      timeout: 15_000,
+      validateStatus: (s) => s === 200 || s === 429,
+    });
+    if (res.status === 200) return res.data;
+    spotifyStats.rateLimited++;
+    if (attempt >= MAX_TRIES) throw new Error(`Spotify rate limit: still 429 after ${MAX_TRIES} tries (${url})`);
+    const retryAfter = Number(res.headers["retry-after"]);
+    const waitS = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : DEFAULT_RETRY_AFTER_S;
+    await sleep(waitS * 1000 + 250);
+  }
+}
+
+/** Album/artist image: the 300px one if present, else the first (largest). */
+function pickImage(images: unknown): string | null {
+  if (!Array.isArray(images) || images.length === 0) return null;
+  const mid = images.find((i: any) => i?.width === 300) ?? images[0];
+  return typeof mid?.url === "string" ? mid.url : null;
+}
+
+/** GET /v1/tracks?ids= (≤ 50 ids). Unknown ids (null in Spotify's array) are left out of the result. */
+export async function fetchTracks(accessToken: string, ids: string[]): Promise<SpotifyTrackMeta[]> {
+  if (ids.length === 0) return [];
+  if (ids.length > 50) throw new Error("fetchTracks: at most 50 ids per call");
+  const data = await getWithRetry("https://api.spotify.com/v1/tracks", accessToken, { ids: ids.join(",") });
+  const out: SpotifyTrackMeta[] = [];
+  for (const t of (data?.tracks ?? []) as any[]) {
+    if (!t || typeof t.id !== "string") continue;
+    out.push({
+      id: t.id,
+      name: typeof t.name === "string" ? t.name : "",
+      artists: (Array.isArray(t.artists) ? t.artists : [])
+        .filter((a: any) => a && typeof a.id === "string")
+        .map((a: any) => ({ id: a.id, name: typeof a.name === "string" ? a.name : "" })),
+      albumName: typeof t.album?.name === "string" ? t.album.name : null,
+      releaseDate: typeof t.album?.release_date === "string" ? t.album.release_date : null,
+      durationMs: typeof t.duration_ms === "number" ? t.duration_ms : null,
+      imageUrl: pickImage(t.album?.images),
+    });
+  }
+  return out;
+}
+
+/** GET /v1/artists?ids= (≤ 50 ids). Unknown ids are left out of the result. */
+export async function fetchArtists(accessToken: string, ids: string[]): Promise<SpotifyArtistMeta[]> {
+  if (ids.length === 0) return [];
+  if (ids.length > 50) throw new Error("fetchArtists: at most 50 ids per call");
+  const data = await getWithRetry("https://api.spotify.com/v1/artists", accessToken, { ids: ids.join(",") });
+  const out: SpotifyArtistMeta[] = [];
+  for (const a of (data?.artists ?? []) as any[]) {
+    if (!a || typeof a.id !== "string") continue;
+    out.push({
+      id: a.id,
+      name: typeof a.name === "string" ? a.name : "",
+      genres: Array.isArray(a.genres) ? a.genres.filter((g: unknown) => typeof g === "string") : [],
+      imageUrl: pickImage(a.images),
+      popularity: typeof a.popularity === "number" ? a.popularity : null,
+    });
+  }
+  return out;
+}

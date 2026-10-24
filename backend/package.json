@@ -10,6 +10,7 @@
     "connect": "ts-node-dev --transpile-only src/connect.ts",
     "backfill:playlist-names": "ts-node-dev --transpile-only src/scripts/backfillPlaylistNames.ts",
     "backfill:api-durations": "ts-node-dev --transpile-only src/scripts/backfillApiDurations.ts",
+    "enrich:catalog": "ts-node --transpile-only src/scripts/enrichCatalog.ts",
     "studio": "prisma studio",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy"

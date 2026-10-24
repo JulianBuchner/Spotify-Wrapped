@@ -135,6 +135,106 @@ export interface WearOut {
   tiredAt: number | null;
 }
 
+/** /api/record/earworms — most plays of one track within any 7-day window. */
+export interface Earworm {
+  spotifyUri: string;
+  trackName: string;
+  artistName: string;
+  plays: number;
+  weekStart: string; // YYYY-MM-DD local
+}
+
+/** /api/record/skip-rate-by-year — skips = plays stopped within 30 s. */
+export interface SkipRateYear {
+  year: number;
+  plays: number;
+  skips: number;
+  skipRate: number; // 0..1
+}
+
+/** /api/record/explore-obsess — share of the year's listening on artists new that year vs. on the year's top 10. */
+export interface ExploreObsessYear {
+  year: number;
+  total: number;
+  newArtistShare: number; // 0..1
+  top10Share: number; // 0..1
+}
+
+// --- /api/genres/* (Eras + Genres routes) -----------------------------------
+
+export interface GenreSummary {
+  artistsTotal: number;
+  artistsWithGenres: number;
+  artistsWithGroup: number;
+  tracksTotal: number;
+  tracksUnresolved: number;
+  coverage: { ms: number; mappedMs: number; share: number }; // share 0..1
+  lastFetchedAt: string | null;
+  unmappedGenres: Array<{ genre: string; ms: number }>;
+  unmappedArtists: Array<{ artistName: string; ms: number; streams: number }>;
+}
+
+/**
+ * Listening per bucket by genre group (one group per play) or by genre (a play
+ * counts once per genre of its artist, so sums exceed the play count).
+ * values[rowIndex][bucketIndex]; rows are sorted by total desc.
+ */
+export interface GenreOverTime {
+  buckets: string[];
+  rows: Array<{ key: string; label: string; total: number }>;
+  values: number[][];
+  unmapped: number[];
+}
+
+/**
+ * Genre groups come in two levels: "group" = the ~18 detailed groups (hardstyle,
+ * trance, bounce, …), "broad" = their 8 coarse parents (hard, dance, techno, …).
+ */
+export type GenreLevel = "group" | "broad";
+
+export interface GenreEra {
+  group: string; // group key on the requested level (broad key with level=broad)
+  label: string;
+  start: number | string; // year (or bucket key)
+  end: number | string;
+  peakYear: number;
+  peakShare: number; // 0..1
+}
+
+/** `groups`, `years[].shares` and `eras` are all on the requested level. */
+export interface GenreEras {
+  years: Array<{ year: number; total: number; shares: Record<string, number> }>; // shares 0..1 per group key
+  groups: Array<{ key: string; label: string; total: number }>;
+  eras: GenreEra[];
+}
+
+export interface GenreArtist {
+  artistName: string;
+  ms: number;
+  streams: number;
+  genres: string[];
+}
+
+/**
+ * Rule-table order of the genre groups — the stable order colours are assigned
+ * in: `groups` for the group level, `broad` for the broad level. Each group
+ * names its broad `parent` key.
+ */
+export interface GenreGroupInfo {
+  groups: Array<{
+    key: string;
+    label: string;
+    parent: string;
+    match: string;
+    artists: number;
+    ms: number;
+    streams: number;
+  }>;
+  broad: Array<{ key: string; label: string }>;
+  overrides: number;
+  unmapped: { artists: number; ms: number; streams: number };
+}
+
 /** Date filter values shared by dashboard + cloud (maps 1:1 to query params). */
 export interface DateWindow {
   range: string; // preset name or "" (custom / none)
