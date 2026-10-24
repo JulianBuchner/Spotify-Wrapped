@@ -29,6 +29,7 @@ npm run dev                 # ts-node-dev with auto-reload, port 3000
 | `npm start` | run compiled `dist/server.js` (production/pm2) |
 | `npm run connect` | one-time Spotify OAuth, stores tokens in DB |
 | `npm run backfill:playlist-names` | one-off: resolve + fill missing `playlistName`s (idempotent) |
+| `npm run backfill:api-durations` | one-off after the 2026-10-24 duration fix: moves the track length of old api rows to `trackDurationMs` and caps `durationMs` by the gap to the next play (idempotent) |
 | `npm run studio` | Prisma Studio DB browser |
 | `npm run migrate:dev` / `migrate:deploy` | create / apply migrations |
 
