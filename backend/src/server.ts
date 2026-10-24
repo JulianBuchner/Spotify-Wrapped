@@ -41,10 +41,11 @@ async function main() {
   // Aggregations over 200k rows take seconds on the Pi; the data changes
   // at most every few minutes (one poll), so 60s of staleness is free
   // speed. recently-played and plays/count stay uncached for freshness.
-  // The story views (record/*, genres/*, wrapped/*) over the big presets are
-  // the expensive ones (5–17 s cold on the Pi) and barely move with one more
-  // play, so they stay fresh for 15 min and their all-time defaults are
-  // prewarmed below; short windows keep the 60 s TTL.
+  // The big presets (all_time, ytd, last_year) are the expensive ones (3–17 s
+  // cold on the Pi) and barely move with one more play, so stats/*, top/*,
+  // record/*, genres/* and wrapped/* over those windows stay fresh for 15 min
+  // and the story pages' all-time defaults are prewarmed below; short windows
+  // keep the 60 s TTL.
   // NOTE: these hooks must be registered BEFORE @fastify/compress — onSend
   // hooks run in registration order, and the cache needs the uncompressed
   // JSON string (compression then still applies to cache hits and misses).
@@ -54,7 +55,7 @@ async function main() {
   const CACHE_MAX_ENTRIES = 200;
   // history/points manages its own cache (pre-gzipped payloads) in its route
   const CACHEABLE = /^\/api\/(stats\/|top\/|playlists|forgotten|wrapped\/|record\/|genres\/)/;
-  const LONG_TTL_PATH = /^\/api\/(record\/|genres\/|wrapped\/)/;
+  const LONG_TTL_PATH = /^\/api\/(record\/|genres\/|wrapped\/|stats\/|top\/)/;
   const LONG_TTL_RANGE = /(^|[?&])range=(all_time|ytd|last_year)(&|$)/;
   const ttlFor = (key: string) =>
     LONG_TTL_PATH.test(key) && LONG_TTL_RANGE.test(key) ? CACHE_LONG_TTL_MS : CACHE_TTL_MS;
