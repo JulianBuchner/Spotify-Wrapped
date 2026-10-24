@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import type {
+  ArtistSeries,
   BucketValue,
   DateWindow,
   DiscoveryPoint,
@@ -8,12 +9,18 @@ import type {
   HistoryPointsData,
   PlaylistInfo,
   RecentPlay,
+  RecordHighlights,
   StatsSummary,
   TopAlbum,
   TopArtist,
   TopPlaylist,
   TopSong,
+  WearOut,
+  WeekHourCell,
+  YearTopArtist,
 } from "./types";
+
+export type Metric = "streams" | "playtime";
 
 // Empty string = same-origin (production build served by the backend).
 const API = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -178,4 +185,47 @@ export function getHistoryPoints(w: DateWindow, playlist?: string) {
     "/api/history/points",
     windowParams(w, playlist)
   );
+}
+
+// --- Record route -----------------------------------------------------------
+
+export function getWeekHourGrid(w: DateWindow, playlist?: string, metric: Metric = "streams") {
+  return cachedGet<{ data: WeekHourCell[] }>(STATS_TTL, "/api/record/week-hour-grid", {
+    ...windowParams(w, playlist),
+    metric,
+  });
+}
+
+export function getStreamsByArtist(
+  w: DateWindow,
+  granularity: Granularity,
+  top = 10,
+  metric: Metric = "streams",
+  playlist?: string
+) {
+  return cachedGet<{ data: ArtistSeries }>(STATS_TTL, "/api/record/streams-by-artist", {
+    ...windowParams(w, playlist),
+    granularity,
+    top,
+    metric,
+  });
+}
+
+export function getTopArtistPerYear(w: DateWindow, playlist?: string, metric: Metric = "streams") {
+  return cachedGet<{ data: YearTopArtist[] }>(STATS_TTL, "/api/record/top-artist-per-year", {
+    ...windowParams(w, playlist),
+    metric,
+  });
+}
+
+export function getRecordHighlights(w: DateWindow, playlist?: string) {
+  return cachedGet<{ data: RecordHighlights }>(
+    STATS_TTL,
+    "/api/record/highlights",
+    windowParams(w, playlist)
+  );
+}
+
+export function getWearOut(w: DateWindow, playlist?: string) {
+  return cachedGet<{ data: WearOut }>(STATS_TTL, "/api/record/wear-out", windowParams(w, playlist));
 }

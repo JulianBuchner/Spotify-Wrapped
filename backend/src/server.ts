@@ -13,6 +13,7 @@ import searchRoutes from "./routes/search";
 import overviewRoutes from "./routes/overview";
 import statsRoutes from "./routes/stats";
 import wrappedRoutes from "./routes/wrapped";
+import recordRoutes from "./routes/record";
 import historyRoutes from "./routes/history";
 import detailRoutes from "./routes/detail";
 
@@ -45,7 +46,7 @@ async function main() {
   const CACHE_TTL_MS = 60_000;
   const CACHE_MAX_ENTRIES = 200;
   // history/points manages its own cache (pre-gzipped payloads) in its route
-  const CACHEABLE = /^\/api\/(stats\/|top\/|playlists|forgotten|wrapped\/)/;
+  const CACHEABLE = /^\/api\/(stats\/|top\/|playlists|forgotten|wrapped\/|record\/)/;
   const responseCache = new Map<string, { body: string; at: number }>();
 
   app.addHook("onRequest", async (request, reply) => {
@@ -91,6 +92,7 @@ async function main() {
   await app.register(overviewRoutes);
   await app.register(statsRoutes);
   await app.register(wrappedRoutes);
+  await app.register(recordRoutes);
   await app.register(historyRoutes);
   await app.register(detailRoutes);
 

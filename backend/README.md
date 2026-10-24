@@ -73,13 +73,18 @@ All endpoints are `GET`. Most accept a date window — either `?range=today|this
 | `/api/recently-played?limit=` | latest plays incl. playlist name |
 | `/api/forgotten` | high historic plays, silent for 30+ days |
 | `/api/history?q=&limit=&offset=` | paginated raw play log, searchable |
-| `/api/history/points` | columnar per-play feed for the listening cloud (parallel arrays `t/track/artist/playlist`) *(playlist ✓)* |
+| `/api/history/points` | columnar per-play feed for the listening cloud and the record (parallel arrays `t/track/artist/playlist/d`, `d` = ms listened) *(playlist ✓)* |
 | `/api/search?q=&types=` | fuzzy search across songs/artists/albums |
 | `/api/song/:spotifyUri`, `/api/artist?name=`, `/api/album?name=` | detail + timelines |
 | `/api/wrapped/top-artist-per-month`, `/api/wrapped/album-obsessions`, `/api/wrapped/top-albums` | wrapped-style fun facts |
+| `/api/record/week-hour-grid?metric=streams\|playtime` | weekday (0=Sun) × hour (local) cells with a value > 0 *(playlist ✓)* |
+| `/api/record/streams-by-artist?granularity=day\|week\|month\|year&top=10&metric=streams\|playtime` | top-N artists (1–20) as one series each over time plus `other`; `values[artist][bucket]` *(playlist ✓)* |
+| `/api/record/top-artist-per-year?metric=streams|playtime` | #1 artist per calendar year (local) by streams or listening time *(playlist ✓)* |
+| `/api/record/highlights` | longest streak of listening days, longest session (20-min gap rule), biggest day, first play, worst earworm (most plays of one track within 7 days); each `null` when the window is empty *(playlist ✓)* |
+| `/api/record/wear-out?maxPlay=30&minPlays=8` | skip rate (< 30 s listened) by nth play of a song; plays are numbered over the whole history, thin trailing steps (< 20 plays) are pooled into the last one *(playlist ✓)* |
 | `/api/stats/artist?name=`, `/api/stats/unique-tracks`, `/api/stats/listen-time` | legacy endpoints, superseded by `summary` |
 
-Responses are gzipped (>1 KB), and the heavy read endpoints (`stats/*`, `top/*`, `history/points`, `playlists`, `forgotten`, `wrapped/*`) sit behind a 60s in-memory response cache (`x-cache: hit`) — aggregations over the ~190k-row play log take seconds on the Pi otherwise. SQLite runs in WAL mode with enlarged cache/mmap (`applySqlitePragmas`).
+Responses are gzipped (>1 KB), and the heavy read endpoints (`stats/*`, `top/*`, `history/points`, `playlists`, `forgotten`, `wrapped/*`, `record/*`) sit behind a 60s in-memory response cache (`x-cache: hit`) — aggregations over the ~190k-row play log take seconds on the Pi otherwise. SQLite runs in WAL mode with enlarged cache/mmap (`applySqlitePragmas`).
 
 ## Serving the frontend
 

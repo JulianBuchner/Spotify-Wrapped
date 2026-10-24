@@ -1,9 +1,8 @@
 import { FastifyPluginAsync } from "fastify";
 import { Prisma } from "@prisma/client";
-import Database from "better-sqlite3";
 import { gzipSync } from "zlib";
-import path from "path";
 import { prisma } from "../db";
+import { readOnlyDb } from "../lib/rawDb";
 import {
   buildPlayedAtFilter,
   playedAtConditions,
@@ -13,20 +12,11 @@ import { parseLimit, parseOffset, likeCondition, num, playlistCondition } from "
 
 // ---------------------------------------------------------------------------
 // /api/history/points serves ~190k rows. Going through Prisma materializes
-// every row as an object (seconds on the Pi), so this endpoint reads via a
-// dedicated read-only better-sqlite3 connection in raw-array mode instead,
-// and caches the final gzipped payload — the gzip alone costs >1s per hit.
-// WAL mode (set at startup) lets this reader coexist with the poller's writes.
+// every row as an object (seconds on the Pi), so this endpoint reads via the
+// shared read-only better-sqlite3 connection (lib/rawDb) in raw-array mode
+// instead, and caches the final gzipped payload — the gzip alone costs >1s
+// per hit.
 // ---------------------------------------------------------------------------
-let roDb: Database.Database | null = null;
-function readOnlyDb(): Database.Database {
-  if (!roDb) {
-    const url = process.env.DATABASE_URL ?? "";
-    const file = path.resolve(url.replace(/^file:/, ""));
-    roDb = new Database(file, { readonly: true, fileMustExist: true });
-  }
-  return roDb;
-}
 
 const POINTS_TTL_MS = 300_000;
 const POINTS_MAX_ENTRIES = 3; // ~12MB json + ~2.5MB gz each — keep few
@@ -148,32 +138,34 @@ function buildPointsPayload(
   const CAP = 500_000;
   const rows = readOnlyDb()
     .prepare(
-      `SELECT "playedAt", "trackName", "artistName", "playlistName"
+      `SELECT "playedAt", "trackName", "artistName", "playlistName", "durationMs"
        FROM "Play" ${whereSql}
        ORDER BY "playedAt" ASC
        LIMIT ${CAP}`
     )
     .raw()
-    .all(...params) as Array<[string, string, string, string | null]>;
+    .all(...params) as Array<[string, string, string, string | null, number]>;
 
   // Columnar payload: with ~190k rows, per-row objects cost ~26MB of JSON
   // and seconds of stringify time on the Pi. Parallel arrays (epoch ms +
-  // names) more than halve the size and serialize far faster.
+  // names + ms listened) more than halve the size and serialize far faster.
   const n = rows.length;
   const t = new Array<number>(n);
   const track = new Array<string>(n);
   const artist = new Array<string>(n);
   const playlistCol = new Array<string | null>(n);
+  const d = new Array<number>(n); // durationMs, index-aligned with t
   for (let i = 0; i < n; i++) {
     const r = rows[i]!;
     t[i] = Date.parse(r[0]);
     track[i] = r[1];
     artist[i] = r[2];
     playlistCol[i] = r[3] ?? null;
+    d[i] = r[4];
   }
 
   const json = JSON.stringify({
-    data: { t, track, artist, playlist: playlistCol },
+    data: { t, track, artist, playlist: playlistCol, d },
     meta: { total: n, capped: n === CAP },
   });
   const gz = gzipSync(json, { level: 3 });

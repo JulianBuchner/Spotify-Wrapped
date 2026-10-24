@@ -13,8 +13,12 @@ const props = withDefaults(
     height?: number;
     formatValue?: (n: number) => string;
     ariaLabel?: string;
+    /** Dashed horizontal line at `value` with a small label at its right end. */
+    referenceLine?: { value: number; label: string };
+    /** Dot + label on the series at data index `index`. */
+    marker?: { index: number; label: string };
   }>(),
-  { height: 260 }
+  { height: 260, referenceLine: undefined, marker: undefined }
 );
 
 const M = { left: 48, right: 14, top: 10, bottom: 26 };
@@ -40,7 +44,9 @@ const fmt = computed(() => props.formatValue ?? formatNumber);
 const plotW = computed(() => Math.max(1, width.value - M.left - M.right));
 const plotH = computed(() => Math.max(1, props.height - M.top - M.bottom));
 
-const maxValue = computed(() => Math.max(1, ...props.data.map((d) => d.value)));
+const maxValue = computed(() =>
+  Math.max(1, props.referenceLine?.value ?? 0, ...props.data.map((d) => d.value))
+);
 const ticks = computed(() => niceTicks(maxValue.value));
 const yMax = computed(() => Math.max(maxValue.value, ticks.value[ticks.value.length - 1] ?? 1));
 
@@ -70,6 +76,27 @@ const xLabels = computed(() => {
   const idxs = new Set<number>();
   for (let k = 0; k < count; k++) idxs.add(Math.round((k / (count - 1 || 1)) * (n - 1)));
   return [...idxs].map((i) => ({ x: x(i), label: props.data[i]?.label ?? "" }));
+});
+
+const reference = computed(() => {
+  const r = props.referenceLine;
+  if (!r) return null;
+  return { y: y(r.value), label: r.label };
+});
+
+const markerPoint = computed(() => {
+  const m = props.marker;
+  if (!m) return null;
+  const d = props.data[m.index];
+  if (!d) return null;
+  const mx = x(m.index);
+  return {
+    x: mx,
+    y: y(d.value),
+    label: m.label,
+    // keep the label inside the plot: anchor it away from the nearest edge
+    anchor: mx > width.value - 90 ? "end" : mx < M.left + 90 ? "start" : "middle",
+  };
 });
 
 // --- hover / crosshair ---
@@ -147,6 +174,27 @@ const hover = computed(() => {
       <path v-if="data.length" :d="areaPath" class="area" />
       <path v-if="data.length" :d="linePath" class="line" />
 
+      <!-- reference line (e.g. an average) -->
+      <g v-if="reference && data.length">
+        <line :x1="M.left" :x2="width - M.right" :y1="reference.y" :y2="reference.y" class="reference" />
+        <text :x="width - M.right - 4" :y="reference.y + 12" class="reference-label" text-anchor="end">
+          {{ reference.label }}
+        </text>
+      </g>
+
+      <!-- marker (a called-out point) -->
+      <g v-if="markerPoint">
+        <circle :cx="markerPoint.x" :cy="markerPoint.y" r="5" class="marker-dot" />
+        <text
+          :x="markerPoint.x"
+          :y="markerPoint.y - 11"
+          class="marker-label"
+          :text-anchor="markerPoint.anchor"
+        >
+          {{ markerPoint.label }}
+        </text>
+      </g>
+
       <!-- crosshair -->
       <g v-if="hover">
         <line :x1="hover.x" :x2="hover.x" :y1="M.top" :y2="height - M.bottom" class="crosshair" />
@@ -167,7 +215,8 @@ const hover = computed(() => {
       <span class="tooltip-label">{{ hover.label }}</span>
     </div>
 
-    <table class="sr-only">
+    <div class="sr-only">
+    <table>
       <caption>{{ ariaLabel }}</caption>
       <tbody>
         <tr v-for="d in data" :key="d.label">
@@ -176,6 +225,7 @@ const hover = computed(() => {
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
 
@@ -205,6 +255,25 @@ svg {
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+.reference {
+  stroke: var(--text-3);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.reference-label {
+  fill: var(--text-3);
+  font-size: 11px;
+}
+.marker-dot {
+  fill: var(--text-1);
+  stroke: var(--bg-surface);
+  stroke-width: 2;
+}
+.marker-label {
+  fill: var(--text-1);
+  font-size: 11px;
+  font-weight: 600;
 }
 .crosshair {
   stroke: var(--axis);

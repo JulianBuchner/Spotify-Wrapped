@@ -84,9 +84,55 @@ export interface DiscoveryPoint {
 /** Columnar /api/history/points payload — parallel arrays, index-aligned. */
 export interface HistoryPointsData {
   t: number[]; // playedAt as epoch ms
+  d: number[]; // durationMs (time actually listened)
   track: string[];
   artist: string[];
   playlist: (string | null)[];
+}
+
+// --- /api/record/* (Record route) -------------------------------------------
+
+/** One weekday × hour cell; weekday uses SQLite %w (0 = Sunday … 6 = Saturday). */
+export interface WeekHourCell {
+  weekday: number;
+  hour: number;
+  value: number;
+}
+
+/** Top-N artists per bucket plus "other"; values[artistIndex][bucketIndex]. */
+export interface ArtistSeries {
+  buckets: string[];
+  artists: string[];
+  values: number[][];
+  other: number[];
+}
+
+export interface YearTopArtist {
+  year: number;
+  artistName: string;
+  streams: number;
+  playtimeMs: number;
+}
+
+export interface RecordHighlights {
+  longestStreak: { days: number; from: string; to: string } | null; // YYYY-MM-DD local
+  longestSession: { ms: number; start: string; end: string; plays: number } | null; // ISO
+  biggestDay: { date: string; ms: number; plays: number } | null; // YYYY-MM-DD local
+  firstPlay: { playedAt: string; trackName: string; artistName: string } | null;
+  earworm: {
+    spotifyUri: string;
+    trackName: string;
+    artistName: string;
+    plays: number;
+    weekStart: string; // YYYY-MM-DD local
+  } | null;
+}
+
+export interface WearOut {
+  steps: Array<{ n: number; skipRate: number; plays: number }>; // skipRate 0..1
+  average: number;
+  best: number;
+  tiredAt: number | null;
 }
 
 /** Date filter values shared by dashboard + cloud (maps 1:1 to query params). */

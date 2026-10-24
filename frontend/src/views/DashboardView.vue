@@ -24,8 +24,9 @@ import {
   formatMsCompact,
   formatNumber,
 } from "../lib/format";
+import { granularityFor } from "../lib/granularity";
 import { latestGuard } from "../lib/latest";
-import type { DateWindow, Granularity, StatsSummary } from "../types";
+import type { DateWindow, StatsSummary } from "../types";
 
 // Default to "this_week": a small index-backed window so the first paint is
 // fast; all-time is one click away.
@@ -37,32 +38,7 @@ const window_ = ref<DateWindow>({ range: "this_week", from: "", to: "" });
 const playlist = ref("");
 
 /** Bucket size for the time charts, derived from the active window. */
-const granularity = computed<Granularity>(() => {
-  const w = window_.value;
-  switch (w.range) {
-    case "today":
-    case "this_week":
-    case "previous_week":
-    case "last_week":
-    case "last_30_days":
-      return "day";
-    case "ytd":
-      return "week";
-    case "last_year":
-      return "week";
-    case "all_time":
-      return "month";
-  }
-  // custom range: derive from span
-  if (w.from && w.to) {
-    const days = (new Date(w.to).getTime() - new Date(w.from).getTime()) / 86_400_000;
-    if (days <= 31) return "day";
-    if (days <= 200) return "week";
-  } else if (w.from || w.to) {
-    return "month";
-  }
-  return "month";
-});
+const granularity = computed(() => granularityFor(window_.value));
 
 // --- summary tiles ---
 const summary = ref<StatsSummary | null>(null);

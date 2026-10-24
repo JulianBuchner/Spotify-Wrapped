@@ -168,7 +168,8 @@ const hover = computed(() => {
       <span class="tooltip-label">{{ hover.label }}</span>
     </div>
 
-    <table class="sr-only">
+    <div class="sr-only">
+    <table>
       <caption>{{ ariaLabel }}</caption>
       <tbody>
         <tr v-for="d in data" :key="d.label">
@@ -177,6 +178,7 @@ const hover = computed(() => {
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
 

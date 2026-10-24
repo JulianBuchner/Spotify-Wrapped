@@ -59,6 +59,39 @@ export function formatDateTime(iso: string): string {
   }).format(d);
 }
 
+/**
+ * Parse a date as LOCAL time. "YYYY-MM-DD" would be read as UTC by `new Date`,
+ * which shifts the day west of Greenwich; full ISO timestamps parse as usual.
+ */
+export function localDate(s: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return new Date(s);
+}
+
+/** "2021-03-03" / ISO -> "Mar 3, 2021" (local) */
+export function formatDate(s: string): string {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
+    localDate(s)
+  );
+}
+
+/** 1 -> "1st", 22 -> "22nd", 13 -> "13th" */
+export function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
 /** Relative "2h ago" / "3d ago" for recently-played rows. */
 export function formatAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

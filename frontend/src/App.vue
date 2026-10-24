@@ -36,6 +36,7 @@ onMounted(async () => {
     <nav class="tabs" aria-label="Main navigation">
       <RouterLink to="/" class="tab" exact-active-class="tab-active">Dashboard</RouterLink>
       <RouterLink to="/cloud" class="tab" active-class="tab-active">Listening Cloud</RouterLink>
+      <RouterLink to="/record" class="tab" active-class="tab-active">Record</RouterLink>
     </nav>
 
     <div class="header-right">
