@@ -1,3 +1,4 @@
+import { computed, ref } from "vue";
 import type {
   BucketValue,
   DateWindow,
@@ -30,13 +31,26 @@ function buildQuery(params: Record<string, QueryValue>) {
   return qs ? `?${qs}` : "";
 }
 
+/**
+ * Requests on the wire right now (client-cache hits don't count). Views read
+ * `isFetching` to show a page-level busy state, e.g. on the date-range filter,
+ * so a slow all-time aggregation is visibly in progress.
+ */
+export const pendingRequests = ref(0);
+export const isFetching = computed(() => pendingRequests.value > 0);
+
 async function apiGet<T>(path: string, params: Record<string, QueryValue> = {}): Promise<T> {
-  const res = await fetch(`${API}${path}${buildQuery(params)}`);
-  const body = await res.json().catch(() => null);
-  if (!res.ok) {
-    throw new Error(body?.error ?? `HTTP ${res.status}`);
+  pendingRequests.value++;
+  try {
+    const res = await fetch(`${API}${path}${buildQuery(params)}`);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(body?.error ?? `HTTP ${res.status}`);
+    }
+    return body as T;
+  } finally {
+    pendingRequests.value--;
   }
-  return body as T;
 }
 
 // ---------------------------------------------------------------------------

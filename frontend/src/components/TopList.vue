@@ -90,7 +90,14 @@ const maxStreams = computed(() => Math.max(1, ...rows.value.map((r) => r.streams
 </script>
 
 <template>
-  <ChartCard title="Top 10" subtitle="Ranked by streams" :loading="loading" :error="error">
+  <ChartCard
+    title="Top 10"
+    subtitle="Ranked by streams"
+    :loading="loading"
+    :error="error"
+    :empty="!rows.length"
+    skeleton="rows"
+  >
     <template #actions>
       <div class="mini-tabs" role="tablist" aria-label="Top list entity">
         <button

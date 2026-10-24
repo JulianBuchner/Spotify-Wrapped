@@ -28,6 +28,8 @@ onMounted(async () => {
     subtitle="Heavily played before, silent for 30+ days"
     :loading="loading"
     :error="error"
+    :empty="!rows.length"
+    skeleton="rows"
   >
     <ul class="forgotten-list">
       <li v-for="r in rows" :key="r.spotifyUri" class="forgotten-row">

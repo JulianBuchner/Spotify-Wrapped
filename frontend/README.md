@@ -40,7 +40,8 @@ src/
     DateRangeFilter.vue     preset segments + custom from/to
     PlaylistFilter.vue      playlist dropdown — lists only playlists played in the selected timeframe; resets to "All" if the selection drops out (hidden until playlist data exists)
     StatCard.vue            KPI tile
-    ChartCard.vue           card chrome: title/subtitle/actions/loading/error
+    ChartCard.vue           card chrome: title/subtitle/actions/loading/error (skeleton on first load, progress bar + "Loading…" chip while stale data reloads)
+    Skeleton.vue            shimmer placeholders shaped like the chart they stand in for (bars / line / rows / block / value)
     TimeSeriesChart.vue     SVG line+area chart, crosshair tooltip
     ColumnChart.vue         SVG column chart, per-bar tooltips, keyboard focusable
     TopList.vue             tabbed Top-10 (songs/artists/albums/playlists)
@@ -56,6 +57,7 @@ src/
 ## Conventions
 
 - **Theming** — components only use CSS custom properties (`var(--…)`) from `style.css`; the canvas reads them at render time via `getComputedStyle`, so both chart types follow the theme toggle instantly. Chart series colors (`--series`) were validated for contrast and color-vision safety in both modes: `#0891b2` light / `#0aa2c0` dark.
-- **Data flow** — views own filter state and pass it down; components fetch their own data and re-fetch when props change. While re-fetching, cards keep the previous render at reduced opacity (no layout jump).
+- **Data flow** — views own filter state and pass it down; components fetch their own data and re-fetch when props change.
+- **Loading states** — a card with nothing to show yet renders a `Skeleton` in the shape of its chart (`empty` + `skeleton` props on `ChartCard`); a card that re-fetches with data on screen keeps the previous render at reduced opacity and adds a top progress bar and a "Loading…" chip (no layout jump). `api.ts` counts requests on the wire (`isFetching`), which the date-range filter shows as a spinner on the active preset. All of it is CSS-only and honors `prefers-reduced-motion`.
 - **Charts** — every chart also renders a screen-reader-only table, and tooltips never gate data.
 - Desktop-first by design: the layout uses the full width and is not optimized for small screens.

@@ -1,25 +1,44 @@
 <script setup lang="ts">
-defineProps<{
-  title: string;
-  subtitle?: string;
-  loading?: boolean;
-  error?: string | null;
-}>();
+import Skeleton from "./Skeleton.vue";
+
+/**
+ * Card chrome around a chart or list. Two loading looks:
+ * - nothing to show yet (`empty`): a skeleton in the chart's shape takes the body's place;
+ * - stale data on screen: the body dims and a progress bar + "Loading…" chip say why.
+ */
+withDefaults(
+  defineProps<{
+    title: string;
+    subtitle?: string;
+    loading?: boolean;
+    error?: string | null;
+    /** True while the slot has no data to draw (first load, or after a reset). */
+    empty?: boolean;
+    skeleton?: "bars" | "line" | "rows" | "block";
+    skeletonHeight?: number;
+  }>(),
+  { empty: false, skeleton: "bars", skeletonHeight: undefined }
+);
 </script>
 
 <template>
-  <section class="card chart-card">
+  <section class="card chart-card" :aria-busy="loading || undefined">
+    <span v-if="loading && !empty" class="loading-bar" aria-hidden="true" />
     <header class="chart-card-header">
       <div class="titles">
         <h3 class="chart-title">{{ title }}</h3>
         <p v-if="subtitle" class="chart-subtitle">{{ subtitle }}</p>
       </div>
       <div class="actions">
+        <span v-if="loading && !empty" class="loading-chip" role="status">Loading…</span>
         <slot name="actions" />
       </div>
     </header>
-    <div class="chart-card-body" :class="{ dimmed: loading }">
+    <div class="chart-card-body" :class="{ dimmed: loading && !empty }">
       <p v-if="error" class="chart-error">{{ error }}</p>
+      <slot v-else-if="loading && empty" name="skeleton">
+        <Skeleton :kind="skeleton" :height="skeletonHeight" />
+      </slot>
       <slot v-else />
     </div>
   </section>
@@ -27,6 +46,7 @@ defineProps<{
 
 <style scoped>
 .chart-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;

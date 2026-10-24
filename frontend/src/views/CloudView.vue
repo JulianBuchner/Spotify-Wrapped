@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, shallowRef, onMounted, onBeforeUnmount, watch } from "vue";
-import { getHistoryPoints } from "../api";
+import { getHistoryPoints, isFetching } from "../api";
 import DateRangeFilter from "../components/DateRangeFilter.vue";
 import ListeningCloud from "../components/ListeningCloud.vue";
 import PlaylistFilter from "../components/PlaylistFilter.vue";
+import Skeleton from "../components/Skeleton.vue";
 import { formatNumber } from "../lib/format";
 import { latestGuard } from "../lib/latest";
 import type { DateWindow, PlayPoint } from "../types";
@@ -69,7 +70,7 @@ watch([window_, playlist], load, { deep: true });
   <div class="cloud-page">
     <div class="cloud-toolbar">
       <div class="toolbar-left">
-        <DateRangeFilter v-model="window_" />
+        <DateRangeFilter v-model="window_" :busy="isFetching" />
         <PlaylistFilter v-model="playlist" :window="window_" />
       </div>
       <div class="toolbar-right">
@@ -86,7 +87,12 @@ watch([window_, playlist], load, { deep: true });
       </div>
     </div>
 
-    <section class="card cloud-card" :class="{ dimmed: loading }">
+    <section
+      class="card cloud-card"
+      :class="{ dimmed: loading && points.length > 0 }"
+      :aria-busy="loading || undefined"
+    >
+      <span v-if="loading && points.length" class="loading-bar" aria-hidden="true" />
       <header class="cloud-header">
         <div>
           <h3 class="cloud-title">Listening cloud</h3>
@@ -95,13 +101,21 @@ watch([window_, playlist], load, { deep: true });
             hover for details.
           </p>
         </div>
-        <span v-if="points.length" class="count-chip">
-          {{ formatNumber(points.length) }} plays
-        </span>
+        <div class="header-right">
+          <span v-if="loading && points.length" class="loading-chip" role="status">Loading…</span>
+          <span v-if="points.length" class="count-chip">
+            {{ formatNumber(points.length) }} plays
+          </span>
+        </div>
       </header>
 
       <p v-if="errorMsg" class="cloud-error">{{ errorMsg }}</p>
       <p v-else-if="!loading && points.length === 0" class="cloud-empty">No plays in this range.</p>
+
+      <div v-else-if="loading && points.length === 0" class="cloud-plot cloud-plot-loading">
+        <Skeleton kind="block" />
+        <p class="cloud-loading-text" role="status">Loading plays…</p>
+      </div>
 
       <div v-else class="cloud-plot">
         <ListeningCloud ref="cloud" :points="points" :highlight="highlight" />
@@ -141,6 +155,7 @@ watch([window_, playlist], load, { deep: true });
 }
 
 .cloud-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   padding: 16px 18px;
@@ -166,6 +181,12 @@ watch([window_, playlist], load, { deep: true });
   font-size: 12px;
   color: var(--text-3);
 }
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
 .count-chip {
   flex-shrink: 0;
   font-size: 12px;
@@ -181,6 +202,19 @@ watch([window_, playlist], load, { deep: true });
 .cloud-plot {
   height: calc(100vh - 280px);
   min-height: 380px;
+}
+
+.cloud-plot-loading {
+  position: relative;
+}
+.cloud-loading-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-3);
 }
 
 .cloud-error {

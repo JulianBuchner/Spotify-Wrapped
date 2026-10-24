@@ -4,6 +4,9 @@ import type { DateWindow } from "../types";
 
 const model = defineModel<DateWindow>({ required: true });
 
+/** True while the page is still fetching for the selected window. */
+defineProps<{ busy?: boolean }>();
+
 const PRESETS: Array<{ value: string; label: string }> = [
   { value: "today", label: "Today" },
   { value: "this_week", label: "This week" },
@@ -41,7 +44,7 @@ watch([from, to], () => {
 </script>
 
 <template>
-  <div class="range-filter" role="group" aria-label="Date range">
+  <div class="range-filter" role="group" aria-label="Date range" :aria-busy="busy || undefined">
     <div class="segments">
       <button
         v-for="p in PRESETS"
@@ -52,6 +55,7 @@ watch([from, to], () => {
         @click="pickPreset(p.value)"
       >
         {{ p.label }}
+        <span v-if="busy && !isCustom && model.range === p.value" class="spinner" aria-hidden="true" />
       </button>
       <button
         type="button"
@@ -60,6 +64,7 @@ watch([from, to], () => {
         @click="openCustom"
       >
         Custom
+        <span v-if="busy && isCustom" class="spinner" aria-hidden="true" />
       </button>
     </div>
     <div v-if="isCustom" class="custom-range">
@@ -88,6 +93,9 @@ watch([from, to], () => {
 }
 
 .segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: none;
   background: transparent;
   color: var(--text-2);
@@ -107,6 +115,10 @@ watch([from, to], () => {
   background: var(--accent-soft);
   color: var(--accent-text);
   font-weight: 600;
+}
+.segment .spinner {
+  border-color: var(--accent-soft);
+  border-top-color: var(--accent-text);
 }
 .segment:focus-visible {
   outline: 2px solid var(--accent);

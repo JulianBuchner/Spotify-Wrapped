@@ -36,6 +36,8 @@ onBeforeUnmount(() => window.clearInterval(timer));
     subtitle="Latest plays, refreshed every minute"
     :loading="loading"
     :error="error"
+    :empty="!rows.length"
+    skeleton="rows"
   >
     <ul class="recent-list">
       <li v-for="r in rows" :key="r.playedAt + r.spotifyUri" class="recent-row">

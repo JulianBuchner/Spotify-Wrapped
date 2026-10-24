@@ -6,6 +6,7 @@ import {
   getListeningClock,
   getStreamsOverTime,
   getSummary,
+  isFetching,
 } from "../api";
 import ChartCard from "../components/ChartCard.vue";
 import ColumnChart, { type ColumnPoint } from "../components/ColumnChart.vue";
@@ -209,7 +210,7 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
 <template>
   <div class="dashboard">
     <div class="filter-row">
-      <DateRangeFilter v-model="window_" />
+      <DateRangeFilter v-model="window_" :busy="isFetching" />
       <PlaylistFilter v-model="playlist" :window="window_" />
     </div>
 
@@ -259,6 +260,9 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
           :subtitle="metric === 'streams' ? 'Streams per ' + granularity : 'Hours listened per ' + granularity"
           :loading="streamsLoading"
           :error="streamsError"
+          :empty="!streamsSeries.length"
+          skeleton="line"
+          :skeleton-height="280"
         >
           <template #actions>
             <div class="mini-tabs" role="tablist" aria-label="Metric">
@@ -299,6 +303,9 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
           subtitle="Streams by hour of day"
           :loading="clockLoading"
           :error="clockError"
+          :empty="!clockData.length"
+          skeleton="bars"
+          :skeleton-height="230"
         >
           <ColumnChart :data="clockData" :height="230" :label-every="3" aria-label="Streams by hour of day" />
         </ChartCard>
@@ -309,6 +316,9 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
           subtitle="Streams by day of week"
           :loading="weekdayLoading"
           :error="weekdayError"
+          :empty="!weekdayData.length"
+          skeleton="bars"
+          :skeleton-height="230"
         >
           <ColumnChart :data="weekdayData" :height="230" aria-label="Streams by day of week" />
         </ChartCard>
@@ -327,6 +337,9 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
           subtitle="Cumulative first-time tracks heard"
           :loading="discoveryLoading"
           :error="discoveryError"
+          :empty="!discoverySeries.length"
+          skeleton="line"
+          :skeleton-height="240"
         >
           <TimeSeriesChart :data="discoverySeries" :height="240" aria-label="Cumulative discovered tracks" />
         </ChartCard>
