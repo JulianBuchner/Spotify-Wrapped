@@ -48,7 +48,8 @@ Plays recorded before the context feature existed have `null` context columns; S
 |---|---|
 | `spotifyUri`, `spotifyId` | track identity |
 | `trackName`, `artistName`, `albumName` | denormalized display fields |
-| `playedAt`, `durationMs` | when + how long |
+| `playedAt`, `durationMs` | when the play started + ms actually listened (import: `ms_played`; api: grows with every poll while the track plays) |
+| `trackDurationMs` | full track length, api rows only |
 | `contextType`, `contextUri`, `playlistName` | what it was played *from* |
 | `source` | `api` (poller) or `import` (Spotify Extended Streaming History export) |
 

@@ -6,11 +6,23 @@ import {
   type PlayingContext,
 } from "./spotify";
 
-// In-memory dedupe so we don't hit the DB every 15s for the same track
+// In-memory dedupe so we don't hit the DB every 15s for the same track. `playId` is the row
+// the current play is written to, so its listened time can grow with every poll.
 const lastSeenByAccount = new Map<
   string,
-  { uri: string; startMs: bigint; lastProgressMs: number | null; lastTimestampMs: number }
+  {
+    uri: string;
+    startMs: bigint;
+    lastProgressMs: number | null;
+    lastTimestampMs: number;
+    playId: string | null;
+    trackDurationMs: number;
+  }
 >();
+
+// A play whose last seen progress got this close to the end of the track counts as played to the
+// end: the last poll before the next track lands up to one poll interval short.
+const FULL_PLAY_SLACK_MS = 20_000;
 
 // Playlist-name cache so we don't call /playlists/{id} on every insert.
 // Successful lookups live long (renames are rare); failed ones retry sooner.
@@ -45,6 +57,25 @@ async function resolvePlaylistName(accessToken: string, uri: string): Promise<st
   }
 }
 
+/** Listened time to store for a play seen at `progressMs`; snaps to the full track when `final` and close to the end. */
+function listenedMs(progressMs: number, trackDurationMs: number, final: boolean): number {
+  if (final && progressMs >= trackDurationMs - FULL_PLAY_SLACK_MS) return trackDurationMs;
+  return Math.max(0, Math.min(progressMs, trackDurationMs));
+}
+
+/** Raise the play's listened time; never lowers it (a restart is a new row, not a rewind). */
+async function recordProgress(playId: string, progressMs: number, trackDurationMs: number, final: boolean) {
+  const ms = listenedMs(progressMs, trackDurationMs, final);
+  try {
+    await prisma.play.updateMany({
+      where: { id: playId, durationMs: { lt: ms } },
+      data: { durationMs: ms },
+    });
+  } catch (err) {
+    console.error(`[poller] Failed to update listened time for play ${playId}`, err);
+  }
+}
+
 export async function pollAllUsersOnce() {
   const accounts = await prisma.spotifyAccount.findMany();
 
@@ -69,11 +100,17 @@ async function pollOneAccount(accountId: string) {
   const accessToken = await ensureAccessToken(account);
 
   const playing = await fetchCurrentlyPlaying(accessToken);
-  if (!playing) return;
+  const prev = lastSeenByAccount.get(accountId);
 
-  if (!playing.isPlaying) return;
-  if (playing.type !== "track") return;
-  if (!playing.item?.uri) return;
+  if (!playing || !playing.isPlaying || playing.type !== "track" || !playing.item?.uri) {
+    // Nothing (or something that isn't a track) playing. The play we were following may have
+    // run to its end since the last poll, so let it count as complete if it got close enough.
+    // The entry stays: a paused track that resumes keeps writing to the same row.
+    if (prev?.playId && prev.lastProgressMs !== null) {
+      await recordProgress(prev.playId, prev.lastProgressMs, prev.trackDurationMs, true);
+    }
+    return;
+  }
 
   const track = playing.item;
 
@@ -83,7 +120,6 @@ async function pollOneAccount(accountId: string) {
 
   // If we're still on the same track, rely on progress to detect restarts and avoid
   // duplicates caused by timestamp/progress jitter.
-  const prev = lastSeenByAccount.get(accountId);
   if (prev && prev.uri === track.uri) {
     if (progressMs === null) {
       lastSeenByAccount.set(accountId, { ...prev, lastTimestampMs: timestampMs });
@@ -100,6 +136,9 @@ async function pollOneAccount(accountId: string) {
           lastProgressMs: progressMs,
           lastTimestampMs: timestampMs,
         });
+        if (prev.playId && progressMs > prevProgress) {
+          await recordProgress(prev.playId, progressMs, prev.trackDurationMs, false);
+        }
         return;
       }
     } else {
@@ -108,16 +147,25 @@ async function pollOneAccount(accountId: string) {
         lastProgressMs: progressMs,
         lastTimestampMs: timestampMs,
       });
+      if (prev.playId) await recordProgress(prev.playId, progressMs, prev.trackDurationMs, false);
       return;
     }
   }
 
+  // A different track, or the same one started over: the previous play is over.
+  if (prev?.playId && prev.lastProgressMs !== null) {
+    await recordProgress(prev.playId, prev.lastProgressMs, prev.trackDurationMs, true);
+  }
+
   // Update in-memory "last seen" immediately (so we don't reprocess during DB work)
+  const trackDurationMs = track.duration_ms;
   lastSeenByAccount.set(accountId, {
     uri: track.uri,
     startMs,
     lastProgressMs: progressMs,
     lastTimestampMs: timestampMs,
+    playId: null,
+    trackDurationMs,
   });
 
   // Prevent duplicates across restarts:
@@ -135,7 +183,13 @@ async function pollOneAccount(accountId: string) {
     select: { id: true },
   });
 
-  if (existing) return;
+  if (existing) {
+    // Recorded before a process restart: keep extending that row's listened time.
+    const seen = lastSeenByAccount.get(accountId);
+    if (seen && seen.uri === track.uri) lastSeenByAccount.set(accountId, { ...seen, playId: existing.id });
+    if (progressMs !== null) await recordProgress(existing.id, progressMs, trackDurationMs, false);
+    return;
+  }
 
   const artistName = track.artists.map((a) => a.name).join(", ");
   const playedAt = new Date(Number(startMs));
@@ -144,7 +198,7 @@ async function pollOneAccount(accountId: string) {
   const playlistName =
     context?.type === "playlist" ? await resolvePlaylistName(accessToken, context.uri) : null;
 
-  await prisma.play.create({
+  const created = await prisma.play.create({
     data: {
       userId: account.userId,
       spotifyUri: track.uri,
@@ -153,13 +207,22 @@ async function pollOneAccount(accountId: string) {
       artistName,
       albumName: track.album?.name ?? null,
       playedAt,
-      durationMs: track.duration_ms,
+      durationMs: listenedMs(progressMs ?? 0, trackDurationMs, false),
+      trackDurationMs,
       contextType: context?.type ?? null,
       contextUri: context?.uri ?? null,
       playlistName,
       source: "api",
     },
+    select: { id: true },
   });
+
+  // Later polls of this track extend the row's listened time. Only if we are still on it:
+  // the entry may already belong to the next track if the DB work took a while.
+  const seen = lastSeenByAccount.get(accountId);
+  if (seen && seen.uri === track.uri && seen.startMs === startMs) {
+    lastSeenByAccount.set(accountId, { ...seen, playId: created.id });
+  }
 
   // Optional: reuse lastAfterMs as "last inserted start time" (not required, but harmless)
   await prisma.spotifyAccount.update({

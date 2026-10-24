@@ -185,7 +185,8 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  // Song-length histogram (works today because durationMs is stored per play).
+  // Song-length histogram. trackDurationMs is the track length (api rows); import rows only
+  // carry the time listened, which is the best available stand-in for them.
   app.get("/api/stats/duration-distribution", async (request, reply) => {
     const query = request.query as Record<string, unknown>;
     const { from, to, error } = buildPlayedAtFilter(query);
@@ -201,7 +202,7 @@ const statsRoutes: FastifyPluginAsync = async (app) => {
         : Prisma.sql`COUNT(*)`;
 
     const rows = await prisma.$queryRaw<Array<any>>`
-      SELECT ((CAST("durationMs" / 1000 AS INTEGER) / ${bucketSize}) * ${bucketSize}) AS bucketStartSec,
+      SELECT ((CAST(COALESCE("trackDurationMs", "durationMs") / 1000 AS INTEGER) / ${bucketSize}) * ${bucketSize}) AS bucketStartSec,
              ${countExpr} AS count
       FROM "Play" ${where}
       GROUP BY bucketStartSec ORDER BY bucketStartSec`;

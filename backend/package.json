@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "connect": "ts-node-dev --transpile-only src/connect.ts",
     "backfill:playlist-names": "ts-node-dev --transpile-only src/scripts/backfillPlaylistNames.ts",
+    "backfill:api-durations": "ts-node-dev --transpile-only src/scripts/backfillApiDurations.ts",
     "studio": "prisma studio",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy"

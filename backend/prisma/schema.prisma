@@ -47,7 +47,11 @@ model Play {
   artistName   String
   albumName    String?
   playedAt     DateTime
+  // Milliseconds actually listened. Import rows carry ms_played from the export;
+  // api rows start at the progress seen by the first poll and grow with every poll.
   durationMs   Int
+  // Full length of the track (api rows only; null for imported rows).
+  trackDurationMs Int?
 
   // Playback context from the currently-playing endpoint (null when Spotify
   // sends no context, e.g. autoplay/radio). playlistName is resolved via
