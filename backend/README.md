@@ -103,7 +103,7 @@ All endpoints are `GET`. Most accept a date window — either `?range=today|this
 | `/api/genres/groups` | the rule table (`key`, `label`, `parent`, `match` regex source) plus the `broad` parent list (stable colour order) with artists per group (global) and `ms`/`streams` in the window, the overrides count, and the same for `unmapped` *(playlist ✓)* |
 | `/api/stats/artist?name=`, `/api/stats/unique-tracks`, `/api/stats/listen-time` | legacy endpoints, superseded by `summary` |
 
-Responses are gzipped (>1 KB), and the heavy read endpoints (`stats/*`, `top/*`, `history/points`, `playlists`, `forgotten`, `wrapped/*`, `record/*`, `genres/*`) sit behind a 60s in-memory response cache (`x-cache: hit`) — aggregations over the ~190k-row play log take seconds on the Pi otherwise. SQLite runs in WAL mode with enlarged cache/mmap (`applySqlitePragmas`).
+Responses are gzipped (>1 KB), and the heavy read endpoints (`stats/*`, `top/*`, `history/points`, `playlists`, `forgotten`, `wrapped/*`, `record/*`, `genres/*`) sit behind an in-memory response cache (`x-cache: hit`; key = path + sorted query) — aggregations over the ~200k-row play log take seconds on the Pi otherwise. TTL is 60 s, except `record/*`, `genres/*` and `wrapped/*` over `range=all_time|ytd|last_year`, which stay cached for 15 min; the default all-time requests of the Record, Eras and Genres pages are prewarmed through the app 20 s after boot and every 14 min (`PREWARM_VIEW_URLS` in `server.ts` — extend it when a page's default request changes). SQLite runs in WAL mode with enlarged cache/mmap (`applySqlitePragmas`).
 
 ## Genres
 
