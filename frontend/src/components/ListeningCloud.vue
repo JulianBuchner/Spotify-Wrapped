@@ -12,7 +12,8 @@ const { theme } = useTheme();
 
 const container = ref<HTMLDivElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
-const tooltip = ref<{ x: number; y: number; text: string } | null>(null);
+// `flip`: within 180px of the right edge the tooltip opens to the left of the cursor
+const tooltip = ref<{ x: number; y: number; text: string; flip: boolean } | null>(null);
 
 const DAY_MS = 86_400_000;
 const TWO_PI = Math.PI * 2;
@@ -432,6 +433,9 @@ function render() {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   const baseY = cssH - M_BOTTOM;
+  // every tick gets its gridline, but a label is only drawn when it clears the
+  // previous one by 8px — on narrow plots the dates would otherwise overlap
+  let lastLabelRight = -Infinity;
   for (const t of buildXTicks()) {
     if (t.x < M_LEFT - 1 || t.x > cssW - M_RIGHT + 1) continue;
     ctx.beginPath();
@@ -440,7 +444,11 @@ function render() {
     ctx.globalAlpha = 0.22;
     ctx.stroke();
     ctx.globalAlpha = 1;
-    ctx.fillText(t.label, t.x, baseY + 4);
+    const half = ctx.measureText(t.label).width / 2;
+    if (t.x - half >= lastLabelRight + 8) {
+      ctx.fillText(t.label, t.x, baseY + 4);
+      lastLabelRight = t.x + half;
+    }
   }
 
   // visible index range (with slack for the dot radius)
@@ -493,7 +501,27 @@ function findNearest(mx: number, my: number): number {
   return best;
 }
 
-function onMouseMove(e: MouseEvent) {
+/** Show the nearest play (if any) at the pointer position. */
+function showTooltipAt(mx: number, my: number) {
+  const i = findNearest(mx, my);
+  if (i >= 0) {
+    const when = new Date(tsArr[i]!).toLocaleString();
+    const playlistLine = playlistRaw[i] ? `\nfrom ${playlistRaw[i]}` : "";
+    tooltip.value = {
+      x: mx,
+      y: my,
+      text: `${when}\n${artistRaw[i]} — ${trackRaw[i]}${playlistLine}`,
+      flip: mx > cssW - 180,
+    };
+  } else {
+    tooltip.value = null;
+  }
+}
+
+// Pointer events (not mouse events) so a finger drag pans on touch screens too;
+// the canvas has `touch-action: pan-y pinch-zoom`, so vertical swipes still
+// scroll the page while horizontal drags pan the cloud.
+function onPointerMove(e: PointerEvent) {
   const rect = canvas.value!.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
@@ -510,29 +538,26 @@ function onMouseMove(e: MouseEvent) {
     return;
   }
 
-  const i = findNearest(mx, my);
-  if (i >= 0) {
-    const when = new Date(tsArr[i]!).toLocaleString();
-    const playlistLine = playlistRaw[i] ? `\nfrom ${playlistRaw[i]}` : "";
-    tooltip.value = { x: mx, y: my, text: `${when}\n${artistRaw[i]} — ${trackRaw[i]}${playlistLine}` };
-  } else {
-    tooltip.value = null;
-  }
+  if (e.pointerType === "touch") return; // no hover on touch: a tap shows the tooltip instead
+  showTooltipAt(mx, my);
 }
 
-function onMouseDown(e: MouseEvent) {
+function onPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return;
   const rect = canvas.value!.getBoundingClientRect();
   dragging = true;
   lastDragX = e.clientX - rect.left;
   lastDragY = e.clientY - rect.top;
-  tooltip.value = null;
+  // a tap on touch screens shows the nearest play (hover doesn't exist there)
+  if (e.pointerType === "touch") showTooltipAt(lastDragX, lastDragY);
+  else tooltip.value = null;
 }
-function onMouseUp() {
+function onPointerUp() {
   dragging = false;
 }
-function onMouseLeave() {
+function onPointerLeave(e: PointerEvent) {
   dragging = false;
-  tooltip.value = null;
+  if (e.pointerType !== "touch") tooltip.value = null;
 }
 
 function onWheel(e: WheelEvent) {
@@ -587,10 +612,11 @@ onMounted(() => {
   });
   if (container.value) ro.observe(container.value);
 
-  c.addEventListener("mousemove", onMouseMove);
-  c.addEventListener("mousedown", onMouseDown);
-  window.addEventListener("mouseup", onMouseUp);
-  c.addEventListener("mouseleave", onMouseLeave);
+  c.addEventListener("pointermove", onPointerMove);
+  c.addEventListener("pointerdown", onPointerDown);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+  c.addEventListener("pointerleave", onPointerLeave);
   c.addEventListener("wheel", onWheel, { passive: false });
 });
 
@@ -598,12 +624,13 @@ onBeforeUnmount(() => {
   ro?.disconnect();
   const c = canvas.value;
   if (c) {
-    c.removeEventListener("mousemove", onMouseMove);
-    c.removeEventListener("mousedown", onMouseDown);
-    c.removeEventListener("mouseleave", onMouseLeave);
+    c.removeEventListener("pointermove", onPointerMove);
+    c.removeEventListener("pointerdown", onPointerDown);
+    c.removeEventListener("pointerleave", onPointerLeave);
     c.removeEventListener("wheel", onWheel);
   }
-  window.removeEventListener("mouseup", onMouseUp);
+  window.removeEventListener("pointerup", onPointerUp);
+  window.removeEventListener("pointercancel", onPointerUp);
   if (rafId) cancelAnimationFrame(rafId);
 });
 
@@ -661,7 +688,11 @@ watch(theme, scheduleRender);
     <div
       v-if="tooltip"
       class="cloud-tooltip"
-      :style="{ left: tooltip.x + 12 + 'px', top: tooltip.y + 12 + 'px' }"
+      :style="{
+        left: tooltip.x + (tooltip.flip ? -12 : 12) + 'px',
+        top: tooltip.y + 12 + 'px',
+        transform: tooltip.flip ? 'translateX(-100%)' : 'none',
+      }"
     >{{ tooltip.text }}</div>
   </div>
 </template>
@@ -682,6 +713,8 @@ watch(theme, scheduleRender);
   width: 100%;
   height: 100%;
   cursor: grab;
+  /* horizontal finger drags pan the cloud; vertical swipes keep scrolling the page */
+  touch-action: pan-y pinch-zoom;
 }
 .cloud-canvas:active {
   cursor: grabbing;
@@ -730,5 +763,21 @@ watch(theme, scheduleRender);
   white-space: pre-line;
   max-width: 260px;
   z-index: 2;
+}
+
+/* phone ≤ 640px: smaller zoom panel so it covers less of the plot (breakpoints: 640 phone, 900 narrow, 1024 tablet) */
+@media (max-width: 640px) {
+  .zoom-controls {
+    top: 8px;
+    right: 8px;
+    padding: 6px 8px;
+    gap: 4px;
+  }
+  .zoom-controls input[type="range"] {
+    width: 90px;
+  }
+  .cloud-tooltip {
+    max-width: min(260px, calc(100% - 24px));
+  }
 }
 </style>

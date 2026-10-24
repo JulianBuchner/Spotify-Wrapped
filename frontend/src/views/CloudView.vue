@@ -97,8 +97,11 @@ watch([window_, playlist], load, { deep: true });
         <div>
           <h3 class="cloud-title">Listening cloud</h3>
           <p class="cloud-subtitle">
-            Each dot is one play — x is the date, y the time of day. Drag to pan, scroll to zoom,
-            hover for details.
+            <span class="hint-long">
+              Each dot is one play — x is the date, y the time of day. Drag to pan, scroll to zoom,
+              hover for details.
+            </span>
+            <span class="hint-short">One dot per play: x date, y time of day. Drag to pan, tap for details.</span>
           </p>
         </div>
         <div class="header-right">
@@ -201,7 +204,11 @@ watch([window_, playlist], load, { deep: true });
 
 .cloud-plot {
   height: calc(100vh - 280px);
+  height: calc(100svh - 280px); /* small viewport height: ignores the mobile browser chrome */
   min-height: 380px;
+}
+.hint-short {
+  display: none;
 }
 
 .cloud-plot-loading {
@@ -226,5 +233,53 @@ watch([window_, playlist], load, { deep: true });
   margin: 8px 0;
   font-size: 13px;
   color: var(--text-3);
+}
+
+/* narrow ≤ 900px: toolbar halves stack (breakpoints: 640 phone, 900 narrow, 1024 tablet) */
+@media (max-width: 900px) {
+  .cloud-plot {
+    height: calc(100svh - 340px);
+    min-height: 340px;
+  }
+}
+
+/* phone ≤ 640px: search + Reset share one full-width row, shorter hint, taller plot floor */
+@media (max-width: 640px) {
+  .cloud-page {
+    gap: 12px;
+  }
+  .cloud-toolbar,
+  .toolbar-left {
+    gap: 10px;
+  }
+  .toolbar-left,
+  .toolbar-right {
+    width: 100%;
+  }
+  .toolbar-right {
+    flex-wrap: wrap;
+  }
+  .highlight-input {
+    flex: 1 1 160px;
+    width: auto;
+    min-width: 0;
+  }
+  .cloud-card {
+    padding: 12px;
+    gap: 10px;
+  }
+  .cloud-header > div:first-child {
+    min-width: 0; /* the hint wraps; the plays chip keeps its place on the title row */
+  }
+  .hint-long {
+    display: none;
+  }
+  .hint-short {
+    display: inline;
+  }
+  .cloud-plot {
+    height: calc(100svh - 400px);
+    min-height: 320px;
+  }
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getGenreArtists, getGenreOverTime, getGenreSummary, isFetching, type Metric } from "../api";
 import ChartCard from "../components/ChartCard.vue";
 import DateRangeFilter from "../components/DateRangeFilter.vue";
@@ -27,6 +27,19 @@ const by = computed<"genre" | "group">(() => (rowKind.value === "genre" ? "genre
 const level = computed<GenreLevel>(() => (rowKind.value === "broad" ? "broad" : "group"));
 const metric = ref<Metric>("streams");
 const TOP_N = 30;
+
+// phone ≤ 640 px: tighter strip rows (20 px instead of 22)
+const phone = ref(false);
+let mq: MediaQueryList | null = null;
+function onMedia() {
+  phone.value = mq?.matches ?? false;
+}
+onMounted(() => {
+  mq = window.matchMedia("(max-width: 640px)");
+  mq.addEventListener("change", onMedia);
+  onMedia();
+});
+onBeforeUnmount(() => mq?.removeEventListener("change", onMedia));
 
 function errorText(e: unknown) {
   return e instanceof Error ? e.message : "Failed to load.";
@@ -146,7 +159,7 @@ const buckets = computed(() => overTime.value?.buckets ?? []);
 const values = computed(() => overTime.value?.values ?? []);
 /** the panel is always dark, so the rows take the dark-mode rainbow on both themes */
 const rowColors = computed(() => rows.value.map((_, i) => rainbowColor(i, rows.value.length, "dark")));
-const plotHeight = computed(() => Math.max(240, 22 * rows.value.length + 30));
+const plotHeight = computed(() => Math.max(240, (phone.value ? 20 : 22) * rows.value.length + 30));
 const bucketLabel = computed(() => (b: string) => formatBucket(b, granularity.value));
 
 const rowNoun = computed(() =>
@@ -256,7 +269,7 @@ const hours = (ms: number) => `${formatNumber(Math.round(ms / 3_600_000))} h`;
             :aria-label="`Listening per bucket, by ${rowNoun}`"
             @select="onSelect"
           />
-          <p class="hint">Click a row for its top artists.</p>
+          <p class="hint">Click or tap a row for its top artists.</p>
         </ChartCard>
       </div>
 
@@ -591,5 +604,31 @@ const hours = (ms: number) => `${formatNumber(Math.round(ms / 3_600_000))} h`;
 .mini-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* narrow ≤ 900 px: the artists card and the coverage card stack */
+@media (max-width: 900px) {
+  .span-6 {
+    grid-column: span 12;
+  }
+}
+/* phone ≤ 640 px: toggles wrap under the filters, 36 px tap targets */
+@media (max-width: 640px) {
+  .grid {
+    gap: 12px;
+  }
+  .toggles {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .mini-tab {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+  .btn {
+    min-height: 36px;
+  }
 }
 </style>

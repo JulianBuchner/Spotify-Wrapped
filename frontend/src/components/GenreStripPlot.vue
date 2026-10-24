@@ -34,7 +34,10 @@ const emit = defineEmits<{ select: [row: StripRow] }>();
 
 const PANEL = "#121618"; // the record's vinyl colour
 const LABEL_W = 190;
-const M = { left: LABEL_W + 10, right: 10, top: 8, bottom: 22 };
+/** below this container width (phones) the label column shrinks to 110 px */
+const NARROW_W = 560;
+const LABEL_W_NARROW = 110;
+const M = { right: 10, top: 8, bottom: 22 };
 const ROW_H = 22;
 const MIN_H = 240;
 
@@ -54,8 +57,10 @@ onMounted(() => {
 });
 onBeforeUnmount(() => ro?.disconnect());
 
+const labelW = computed(() => (width.value < NARROW_W ? LABEL_W_NARROW : LABEL_W));
+const left = computed(() => labelW.value + 10);
 const height = computed(() => props.height ?? Math.max(MIN_H, M.top + M.bottom + ROW_H * props.rows.length));
-const plotW = computed(() => Math.max(1, width.value - M.left - M.right));
+const plotW = computed(() => Math.max(1, width.value - left.value - M.right));
 const plotH = computed(() => Math.max(1, height.value - M.top - M.bottom));
 const rowH = computed(() => plotH.value / Math.max(1, props.rows.length));
 const cellW = computed(() => plotW.value / Math.max(1, props.buckets.length));
@@ -65,7 +70,7 @@ const rowGap = computed(() => (rowH.value >= 8 ? 2 : 0));
 const radius = computed(() => (cellW.value >= 7 && rowH.value >= 10 ? 2 : 0));
 
 function x(b: number) {
-  return M.left + b * cellW.value;
+  return left.value + b * cellW.value;
 }
 function y(r: number) {
   return M.top + r * rowH.value;
@@ -98,9 +103,10 @@ const cellsByRow = computed<Cell[][]>(() =>
 );
 
 /** Row labels, ellipsised to the label column (SVG text can't do it on its own). */
-const MAX_CHARS = Math.floor(LABEL_W / 6.4);
+const maxChars = computed(() => Math.floor(labelW.value / 6.4));
 function shortLabel(label: string) {
-  return label.length > MAX_CHARS ? `${label.slice(0, MAX_CHARS - 1)}…` : label;
+  const max = maxChars.value;
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
 }
 
 // --- x axis: year labels at the first bucket of each year (thinned when crowded) ---
@@ -119,13 +125,15 @@ const xTicks = computed(() => {
       }
     });
     if (idx.length > 1) {
-      // sparse buckets can put several years within a few px: keep a tick only ≥ 36 px after the last
-      const out: Array<{ x: number; label: string }> = [];
+      // sparse buckets (or a narrow plot) can put several years within a few px:
+      // keep a tick only ≥ 40 px after the last, so phones get every 2nd year
+      const out: Array<{ x: number; label: string; end: boolean }> = [];
       let lastX = -Infinity;
       for (const i of idx) {
         const tx = x(i);
-        if (tx - lastX < 36) continue;
-        out.push({ x: tx, label: props.buckets[i]!.slice(0, 4) });
+        if (tx - lastX < 40) continue;
+        // a year that starts within ~30 px of the right edge (narrow plots) reads right-to-left of its line
+        out.push({ x: tx, label: props.buckets[i]!.slice(0, 4), end: tx + 32 > width.value - M.right });
         lastX = tx;
       }
       return out;
@@ -134,7 +142,7 @@ const xTicks = computed(() => {
   const count = Math.min(6, n);
   const idxs = new Set<number>();
   for (let k = 0; k < count; k++) idxs.add(Math.round((k / (count - 1 || 1)) * (n - 1)));
-  return [...idxs].map((i) => ({ x: x(i), label: fmtBucket.value(props.buckets[i]!) }));
+  return [...idxs].map((i) => ({ x: x(i), label: fmtBucket.value(props.buckets[i]!), end: false }));
 });
 
 const fmtBucket = computed(() => props.formatBucket ?? ((b: string) => b));
@@ -148,20 +156,25 @@ const fmtValue = computed(() =>
 const hoverRow = ref<number | null>(null);
 const hoverCell = ref<{ r: number; b: number } | null>(null);
 
-function onPlotMove(e: PointerEvent) {
+function cellAt(e: { clientX: number; clientY: number }) {
   const rect = container.value!.getBoundingClientRect();
   const px = e.clientX - rect.left;
   const py = e.clientY - rect.top;
   const r = Math.floor((py - M.top) / rowH.value);
-  const b = Math.floor((px - M.left) / cellW.value);
-  if (r < 0 || r >= props.rows.length || b < 0 || b >= props.buckets.length) {
-    hoverCell.value = null;
-    return;
-  }
-  hoverCell.value = { r, b };
+  const b = Math.floor((px - left.value) / cellW.value);
+  if (r < 0 || r >= props.rows.length || b < 0 || b >= props.buckets.length) return null;
+  return { r, b };
+}
+function onPlotMove(e: PointerEvent) {
+  hoverCell.value = cellAt(e);
 }
 function onPlotLeave() {
   hoverCell.value = null;
+}
+/** A tap fires no pointermove first, so the row comes from the click position, not the hover. */
+function onPlotClick(e: MouseEvent) {
+  const c = cellAt(e);
+  if (c) select(c.r);
 }
 
 const tooltip = computed(() => {
@@ -212,7 +225,9 @@ const yearTotals = computed(() =>
       <g>
         <template v-for="(t, i) in xTicks" :key="'t' + i">
           <line :x1="t.x" :x2="t.x" :y1="M.top" :y2="M.top + plotH" class="tick-line" />
-          <text :x="t.x + 3" :y="height - 7" class="tick-label">{{ t.label }}</text>
+          <text :x="t.x + (t.end ? -3 : 3)" :y="height - 7" class="tick-label" :text-anchor="t.end ? 'end' : 'start'">
+            {{ t.label }}
+          </text>
         </template>
       </g>
 
@@ -227,7 +242,7 @@ const yearTotals = computed(() =>
         <rect
           :x="0"
           :y="y(r)"
-          :width="M.left"
+          :width="left"
           :height="rowH"
           class="label-hit"
           tabindex="0"
@@ -240,7 +255,7 @@ const yearTotals = computed(() =>
           @keydown.enter.prevent="select(r)"
           @keydown.space.prevent="select(r)"
         />
-        <text :x="LABEL_W" :y="y(r) + rowH / 2" class="row-label" text-anchor="end" dominant-baseline="middle">
+        <text :x="labelW" :y="y(r) + rowH / 2" class="row-label" text-anchor="end" dominant-baseline="middle">
           <title>{{ row.label }}</title>
           {{ shortLabel(row.label) }}
         </text>
@@ -260,14 +275,14 @@ const yearTotals = computed(() =>
 
       <!-- one hit area over the cells: hover → tooltip, click → select -->
       <rect
-        :x="M.left"
+        :x="left"
         :y="M.top"
         :width="plotW"
         :height="plotH"
         class="plot-hit"
         @pointermove="onPlotMove"
         @pointerleave="onPlotLeave"
-        @click="hoverCell && select(hoverCell.r)"
+        @click="onPlotClick"
       />
       <rect
         v-if="hoverCell"

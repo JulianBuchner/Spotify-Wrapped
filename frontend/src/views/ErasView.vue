@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   getEarworms,
   getExploreObsess,
@@ -57,6 +57,20 @@ const granularity = computed(() => granularityFor(window_.value));
 const metric = ref<Metric>("playtime");
 /** Groups | Broad — the ~18 detailed groups or their 8 coarse parents; feeds the streamgraph + eras. */
 const level = ref<GenreLevel>("group");
+
+// phone ≤ 640 px: the streamgraph gets a lower plot (its labels are hidden there anyway)
+const phone = ref(false);
+let mq: MediaQueryList | null = null;
+function onMedia() {
+  phone.value = mq?.matches ?? false;
+}
+onMounted(() => {
+  mq = window.matchMedia("(max-width: 640px)");
+  mq.addEventListener("change", onMedia);
+  onMedia();
+});
+onBeforeUnmount(() => mq?.removeEventListener("change", onMedia));
+const streamHeight = computed(() => (phone.value ? 280 : 360));
 
 function errorText(e: unknown) {
   return e instanceof Error ? e.message : "Failed to load.";
@@ -454,7 +468,7 @@ const barsSubtitle = computed(() =>
           :error="overTimeError"
           :empty="!streamBuckets.length"
           skeleton="line"
-          :skeleton-height="360"
+          :skeleton-height="streamHeight"
         >
           <GenreStreamgraph
             :buckets="streamBuckets"
@@ -462,7 +476,7 @@ const barsSubtitle = computed(() =>
             :values="streamValues"
             :eras="eras?.eras ?? []"
             :years="eras?.years ?? []"
-            :height="360"
+            :height="streamHeight"
             :format-bucket="bucketLabel"
             :aria-label="`Share of listening per bucket, by ${levelNoun}`"
           />
@@ -667,5 +681,45 @@ const barsSubtitle = computed(() =>
 .mini-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* tablet ≤ 1024 px: 4 KPI tiles in 3 columns; long values get two lines, then an ellipsis */
+@media (max-width: 1024px) {
+  .kpi-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .kpi-row :deep(.stat-value) {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+}
+/* narrow ≤ 900 px: the half-width cards stack */
+@media (max-width: 900px) {
+  .span-6 {
+    grid-column: span 12;
+  }
+}
+/* phone ≤ 640 px: 2 KPI columns, the toggle row wraps under the filters, 36 px tap targets */
+@media (max-width: 640px) {
+  .kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .grid {
+    gap: 12px;
+  }
+  .toggles {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .mini-tab {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
 }
 </style>

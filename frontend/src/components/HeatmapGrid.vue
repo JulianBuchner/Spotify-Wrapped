@@ -131,9 +131,16 @@ const LEGEND_STEPS = [0.06, 0.3, 0.55, 0.8, 1];
         />
       </g>
 
-      <!-- hour labels every 3 h -->
+      <!-- hour labels every 3 h (the in-between ones are hidden on phones) -->
       <template v-for="h in HOURS" :key="'h' + h">
-        <text v-if="h % 3 === 0" :x="x(h)" :y="height - 6" class="tick-label" text-anchor="start">
+        <text
+          v-if="h % 3 === 0"
+          :x="x(h)"
+          :y="height - 6"
+          class="tick-label"
+          :class="{ minor: h % 6 !== 0 }"
+          text-anchor="start"
+        >
           {{ h }}
         </text>
       </template>
@@ -246,5 +253,16 @@ svg {
 .tooltip-label {
   font-size: 11px;
   opacity: 0.75;
+}
+
+/* phone ≤ 640 px: hour labels every 6 h (24 columns in ~300 px), legend left under the grid */
+@media (max-width: 640px) {
+  .tick-label.minor {
+    display: none;
+  }
+  .legend {
+    justify-content: flex-start;
+    margin-top: 6px;
+  }
 }
 </style>

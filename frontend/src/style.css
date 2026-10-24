@@ -294,6 +294,29 @@ select {
   }
 }
 
+/* ----------------------------- responsive ------------------------------- */
+
+/* horizontally scrollable strip (tabs, preset segments) with a hidden scrollbar */
+.hscroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+.hscroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* phone ≤ 640px: controls grow to touch-friendly heights (breakpoints: 640 phone, 900 narrow, 1024 tablet) */
+@media (max-width: 640px) {
+  .btn,
+  .input,
+  .select {
+    min-height: 36px;
+  }
+}
+
 /* ---------------------------- accessibility ------------------------------ */
 
 .sr-only {

@@ -707,21 +707,30 @@ function drawOverlay() {
     const label = QUARTER_LABELS[h];
     if (label) {
       const rL = sR + 16;
-      const lx = scx + rL * Math.cos(a);
+      let lx = scx + rL * Math.cos(a);
       const ly = scy + rL * Math.sin(a);
       over.textAlign = h === 6 ? "left" : h === 18 ? "right" : "center";
       over.textBaseline = h === 0 ? "bottom" : h === 12 ? "top" : "middle";
+      // on a width-bound disc (phones) "6 am" / "6 pm" would run past the canvas
+      // edge: slide them in so the text stays fully visible
+      const tw = over.measureText(label).width;
+      if (h === 6) lx = Math.min(lx, cssW - 2 - tw);
+      else if (h === 18) lx = Math.max(lx, 2 + tw);
       over.fillText(label, lx, ly);
     }
   }
 
-  // guide labels, sitting just right of midnight on their ring
+  // guide labels, sitting just right of midnight on their ring; on a small
+  // disc (< 320 px across on screen) only every other one, they'd touch otherwise
   over.font = "10px system-ui, sans-serif";
   over.fillStyle = colors.onLabel;
   over.textAlign = "left";
   over.textBaseline = "bottom";
+  const everyOther = sR * 2 < 320;
   let lastLabelY = -Infinity;
-  for (const g of guides) {
+  for (let gi = 0; gi < guides.length; gi++) {
+    if (everyOther && gi % 2 === 1) continue;
+    const g = guides[gi]!;
     const r = (ringRadius(g.day) - ringT / 2) * k;
     const y = scy - r - 1;
     if (Math.abs(y - lastLabelY) < 12) continue; // skip labels that would collide
@@ -1115,7 +1124,7 @@ watch(theme, redrawAll);
       :class="{ zoomed, dragging }"
       :style="{ height: height + 'px' }"
       role="img"
-      aria-label="One ring per day, every play as an arc at its time of day. Mouse wheel zooms, drag pans."
+      aria-label="One ring per day, every play as an arc at its time of day. Mouse wheel zooms, drag (or a finger, once zoomed) pans."
       @pointermove="onPointerMove"
       @pointerleave="onPointerLeave"
       @pointerdown="onPointerDown"
@@ -1284,5 +1293,13 @@ watch(theme, redrawAll);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* phone ≤ 640 px: the four highlight rows in two columns */
+@media (max-width: 640px) {
+  .highlights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+  }
 }
 </style>

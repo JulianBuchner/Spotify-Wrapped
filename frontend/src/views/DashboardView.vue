@@ -355,6 +355,7 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
 }
 .span-12 {
   grid-column: span 12;
+  min-width: 0; /* a grid item's auto min-width would let the SVG's own width prop the card open */
 }
 .span-7 {
   grid-column: span 7;
@@ -399,5 +400,45 @@ const playtimeHoursLabel = computed(() => (n: number) => `${formatNumber(n)}h`);
 .mini-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* tablet ≤ 1024px: three KPI tiles per row (breakpoints: 640 phone, 900 narrow, 1024 tablet) */
+@media (max-width: 1024px) {
+  .kpi-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* narrow ≤ 900px: every card takes the full width */
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .span-12,
+  .span-7,
+  .span-5 {
+    grid-column: 1 / -1;
+  }
+}
+
+/* phone ≤ 640px: two KPI tiles per row, tighter gaps, taller mini-tabs for touch */
+@media (max-width: 640px) {
+  .dashboard {
+    gap: 12px;
+  }
+  .filter-row {
+    gap: 10px;
+  }
+  .kpi-row {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .grid {
+    gap: 12px;
+  }
+  .mini-tab {
+    min-height: 36px;
+    padding: 4px 12px;
+  }
 }
 </style>

@@ -38,6 +38,18 @@ const container = ref<HTMLDivElement | null>(null);
 const width = ref(800);
 let ro: ResizeObserver | null = null;
 
+// Viewport classes (breakpoints: phone ≤ 640 px, narrow ≤ 900 px). On phones the
+// in-band labels and the era header text go (the dashed era rules stay) and the
+// header strip shrinks; between 640 and 900 only the top 3 bands get a label.
+const phone = ref(false);
+const narrow = ref(false);
+let mqPhone: MediaQueryList | null = null;
+let mqNarrow: MediaQueryList | null = null;
+function onMedia() {
+  phone.value = mqPhone?.matches ?? false;
+  narrow.value = mqNarrow?.matches ?? false;
+}
+
 onMounted(() => {
   ro = new ResizeObserver((entries) => {
     const w = entries[0]?.contentRect.width;
@@ -47,13 +59,27 @@ onMounted(() => {
     width.value = container.value.clientWidth || 800;
     ro.observe(container.value);
   }
+  mqPhone = window.matchMedia("(max-width: 640px)");
+  mqNarrow = window.matchMedia("(max-width: 900px)");
+  mqPhone.addEventListener("change", onMedia);
+  mqNarrow.addEventListener("change", onMedia);
+  onMedia();
 });
-onBeforeUnmount(() => ro?.disconnect());
+onBeforeUnmount(() => {
+  ro?.disconnect();
+  mqPhone?.removeEventListener("change", onMedia);
+  mqNarrow?.removeEventListener("change", onMedia);
+});
+
+const topLabels = computed(() => (phone.value ? 0 : narrow.value ? 3 : TOP_LABELS));
+const showEraText = computed(() => !phone.value);
+/** header strip above the plot: room for two rows of era labels, or just the rule stubs on phones */
+const top = computed(() => (phone.value ? 20 : M.top));
 
 const fmtBucket = computed(() => props.formatBucket ?? ((b: string) => b));
 const plotW = computed(() => Math.max(1, width.value - M.left - M.right));
-const plotH = computed(() => Math.max(1, props.height - M.top - M.bottom));
-const plotBottom = computed(() => M.top + plotH.value);
+const plotH = computed(() => Math.max(1, props.height - top.value - M.bottom));
+const plotBottom = computed(() => top.value + plotH.value);
 
 function x(i: number) {
   const n = props.buckets.length;
@@ -61,7 +87,7 @@ function x(i: number) {
   return M.left + (i / (n - 1)) * plotW.value;
 }
 function y(share: number) {
-  return M.top + plotH.value * (1 - share);
+  return top.value + plotH.value * (1 - share);
 }
 
 // --- smoothing: centred Gaussian, σ = 2 buckets, window 7 (±3), renormalised at the edges ---
@@ -223,9 +249,10 @@ function bucketIndexOf(start: number | string) {
 const eraMarks = computed(() => {
   const n = props.buckets.length;
   if (!n) return [];
-  const out: Array<{ key: string; x: number; label: string; range: string; anchor: string; row: number }> = [];
+  const out: Array<{ key: string; x: number; label: string; range: string; anchor: string; row: number; text: boolean }> = [];
   // Short eras sit close together, so a label that would run into the previous one
-  // drops to a second header row. Width is estimated from the text length.
+  // drops to a second header row. Width is estimated from the text length. On a
+  // narrow plot (≤ 900 px) a label that fits in neither row keeps only its rule.
   const rowEnd = [-Infinity, -Infinity];
   for (const era of props.eras) {
     const i = bucketIndexOf(era.start);
@@ -235,9 +262,11 @@ const eraMarks = computed(() => {
     const anchor = ex > width.value - M.right - 90 ? "end" : "start";
     const w = Math.max(era.label.length * 6.4, range.length * 6) + 10;
     const left = anchor === "end" ? ex - w : ex;
-    const row = left >= rowEnd[0]! ? 0 : left >= rowEnd[1]! ? 1 : 0;
-    rowEnd[row] = left + w;
-    out.push({ key: `${era.group}-${era.start}`, x: ex, label: era.label, range, anchor, row });
+    const free = left >= rowEnd[0]! ? 0 : left >= rowEnd[1]! ? 1 : -1;
+    const text = free >= 0 || !narrow.value;
+    const row = free >= 0 ? free : 0;
+    if (text) rowEnd[row] = left + w;
+    out.push({ key: `${era.group}-${era.start}`, x: ex, label: era.label, range, anchor, row, text });
   }
   return out;
 });
@@ -254,7 +283,7 @@ const bandLabels = computed(() => {
     detail: string | null;
     dark: boolean;
   }> = [];
-  for (const r of rowsByTotal.value.slice(0, TOP_LABELS)) {
+  for (const r of rowsByTotal.value.slice(0, topLabels.value)) {
     const band = bands.value.find((b) => b.r === r);
     const row = props.rows[r];
     if (!band || !row) continue;
@@ -353,7 +382,17 @@ const hover = computed(() => {
     .slice(0, 6)
     .map((r) => ({ ...r, text: `${(r.share * 100).toFixed(1)}%` }));
   const hx = x(b);
-  return { x: hx, label: fmtBucket.value(bucket), rows, flip: hx > width.value - 220 };
+  // the tooltip is ~230 px wide: on a phone it is pinned to the plot's left or
+  // right edge (whichever is away from the crosshair) so it never leaves the card
+  const flip = hx > width.value - 220;
+  return {
+    x: hx,
+    label: fmtBucket.value(bucket),
+    rows,
+    flip,
+    left: phone.value ? (hx > width.value / 2 ? 0 : width.value) : hx + (flip ? -12 : 12),
+    shift: phone.value ? hx <= width.value / 2 : flip,
+  };
 });
 
 // --- screen-reader table: year × group shares when the eras endpoint gave years ---
@@ -383,13 +422,15 @@ const tableRows = computed(() => {
         <!-- era header: label + range at the era's start, a thin rule down the plot -->
         <g>
           <template v-for="e in eraMarks" :key="e.key">
-            <line :x1="e.x" :x2="e.x" :y1="M.top - 12" :y2="plotBottom" class="era-rule" />
-            <text :x="e.x + (e.anchor === 'end' ? -5 : 5)" :y="12 + e.row * 26" class="era-label" :text-anchor="e.anchor">
-              {{ e.label }}
-            </text>
-            <text :x="e.x + (e.anchor === 'end' ? -5 : 5)" :y="24 + e.row * 26" class="era-range" :text-anchor="e.anchor">
-              {{ e.range }}
-            </text>
+            <line :x1="e.x" :x2="e.x" :y1="top - 12" :y2="plotBottom" class="era-rule" />
+            <template v-if="showEraText && e.text">
+              <text :x="e.x + (e.anchor === 'end' ? -5 : 5)" :y="12 + e.row * 26" class="era-label" :text-anchor="e.anchor">
+                {{ e.label }}
+              </text>
+              <text :x="e.x + (e.anchor === 'end' ? -5 : 5)" :y="24 + e.row * 26" class="era-range" :text-anchor="e.anchor">
+                {{ e.range }}
+              </text>
+            </template>
           </template>
         </g>
 
@@ -433,16 +474,16 @@ const tableRows = computed(() => {
         </g>
 
         <!-- crosshair -->
-        <line v-if="hover" :x1="hover.x" :x2="hover.x" :y1="M.top" :y2="plotBottom" class="crosshair" />
+        <line v-if="hover" :x1="hover.x" :x2="hover.x" :y1="top" :y2="plotBottom" class="crosshair" />
       </svg>
 
       <div
         v-if="hover"
         class="chart-tooltip"
         :style="{
-          left: hover.x + (hover.flip ? -12 : 12) + 'px',
-          top: M.top + 8 + 'px',
-          transform: hover.flip ? 'translateX(-100%)' : 'none',
+          left: hover.left + 'px',
+          top: top + 8 + 'px',
+          transform: hover.shift ? 'translateX(-100%)' : 'none',
         }"
       >
         <span class="tooltip-label">{{ hover.label }}</span>
@@ -613,5 +654,21 @@ svg {
   padding-left: 10px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+
+/* phone ≤ 640 px: the legend in two columns, a narrower tooltip */
+@media (max-width: 640px) {
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 10px;
+  }
+  .legend-item {
+    max-width: none;
+    min-width: 0;
+  }
+  .tooltip-name {
+    max-width: 120px;
+  }
 }
 </style>

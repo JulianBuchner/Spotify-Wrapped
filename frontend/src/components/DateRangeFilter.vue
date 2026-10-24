@@ -1,11 +1,26 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import type { DateWindow } from "../types";
 
 const model = defineModel<DateWindow>({ required: true });
 
 /** True while the page is still fetching for the selected window. */
 defineProps<{ busy?: boolean }>();
+
+// On phones the segment strip scrolls horizontally: keep the active preset in
+// view (centered when possible) without scrolling the page.
+const segmentsEl = ref<HTMLElement | null>(null);
+function revealActive() {
+  const strip = segmentsEl.value;
+  const active = strip?.querySelector<HTMLElement>(".segment.active");
+  if (!strip || !active || strip.scrollWidth <= strip.clientWidth) return;
+  const target = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
+  strip.scrollLeft = Math.max(0, Math.min(target, strip.scrollWidth - strip.clientWidth));
+}
+onMounted(async () => {
+  await nextTick();
+  revealActive();
+});
 
 const PRESETS: Array<{ value: string; label: string }> = [
   { value: "today", label: "Today" },
@@ -45,7 +60,7 @@ watch([from, to], () => {
 
 <template>
   <div class="range-filter" role="group" aria-label="Date range" :aria-busy="busy || undefined">
-    <div class="segments">
+    <div ref="segmentsEl" class="segments hscroll">
       <button
         v-for="p in PRESETS"
         :key="p.value"
@@ -132,5 +147,33 @@ watch([from, to], () => {
 }
 .dash {
   color: var(--text-3);
+}
+
+/* phone ≤ 640px: the preset strip scrolls sideways, the custom dates take their own line */
+@media (max-width: 640px) {
+  .range-filter {
+    width: 100%;
+    max-width: 100%;
+    gap: 10px;
+  }
+  .segments {
+    display: flex;
+    flex: 0 1 auto;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .segment {
+    flex-shrink: 0;
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+  .custom-range {
+    flex: 1 0 100%;
+    display: flex;
+  }
+  .custom-range .input {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
 </style>

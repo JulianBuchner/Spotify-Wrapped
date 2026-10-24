@@ -212,4 +212,12 @@ const tooltip = computed(() => {
   font-size: 11px;
   opacity: 0.75;
 }
+
+/* phone ≤ 640 px: a narrower name column so the bars keep some length */
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 18px minmax(72px, 112px) minmax(0, 1fr) 52px;
+    gap: 8px;
+  }
+}
 </style>

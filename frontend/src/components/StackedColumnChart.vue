@@ -62,6 +62,21 @@ const yMax = computed(() => Math.max(maxValue.value, ticks.value[ticks.value.len
 const band = computed(() => plotW.value / Math.max(1, props.buckets.length));
 const barW = computed(() => Math.min(MAX_BAR, Math.max(2, band.value - GAP * 2)));
 
+/**
+ * `labelEvery` is a minimum: when the bands get narrower than the widest label
+ * (≈ 6px per character at 11px + a 6px gap) the stride grows in multiples of
+ * `labelEvery` so labels never overlap on narrow charts.
+ */
+const CHAR_PX = 6;
+const LABEL_GAP = 6;
+const labelStride = computed(() => {
+  const every = Math.max(1, props.labelEvery);
+  const widest = Math.max(1, ...props.buckets.map((b) => b.length));
+  const minPx = widest * CHAR_PX + LABEL_GAP;
+  const perLabel = band.value * every;
+  return every * Math.max(1, Math.ceil(minPx / Math.max(1, perLabel)));
+});
+
 function xCenter(i: number) {
   return M.left + band.value * (i + 0.5);
 }
@@ -143,7 +158,7 @@ const hover = computed(() => {
         <!-- x labels -->
         <g>
           <template v-for="(label, i) in buckets" :key="'l' + i">
-            <text v-if="i % labelEvery === 0" :x="xCenter(i)" :y="height - 8" class="tick-label" text-anchor="middle">
+            <text v-if="i % labelStride === 0" :x="xCenter(i)" :y="height - 8" class="tick-label" text-anchor="middle">
               {{ label }}
             </text>
           </template>
@@ -331,5 +346,15 @@ svg {
   padding-top: 3px;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
   font-weight: 650;
+}
+
+/* phone ≤ 640px: narrower tooltip names and legend entries */
+@media (max-width: 640px) {
+  .tooltip-name {
+    max-width: 120px;
+  }
+  .legend-item {
+    max-width: 140px;
+  }
 }
 </style>

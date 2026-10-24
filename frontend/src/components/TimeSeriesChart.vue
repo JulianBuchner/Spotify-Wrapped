@@ -68,14 +68,33 @@ const areaPath = computed(() => {
   return `${linePath.value} L${x(props.data.length - 1).toFixed(1)},${base} L${x(0).toFixed(1)},${base} Z`;
 });
 
-/** ~6 x-axis labels, evenly sampled */
+/** Labels closer than this (px) are thinned so date labels never overlap on narrow charts. */
+const MIN_LABEL_GAP = 64;
+
+/** ~6 x-axis labels, evenly sampled, then thinned to ≥ 64px apart (first and last always kept). */
 const xLabels = computed(() => {
   const n = props.data.length;
   if (!n) return [];
   const count = Math.min(6, n);
   const idxs = new Set<number>();
   for (let k = 0; k < count; k++) idxs.add(Math.round((k / (count - 1 || 1)) * (n - 1)));
-  return [...idxs].map((i) => ({ x: x(i), label: props.data[i]?.label ?? "" }));
+  const candidates = [...idxs];
+  const last = candidates[candidates.length - 1]!;
+  const lastX = x(last);
+  const kept: number[] = [];
+  let prevX = -Infinity;
+  for (const i of candidates) {
+    if (i === last) break;
+    const xi = x(i);
+    // the first label is start-anchored and the last end-anchored, so their
+    // text reaches further inwards than a centered label: ask for 1.5× the gap there
+    const gapToPrev = kept.length === 1 ? MIN_LABEL_GAP * 1.5 : MIN_LABEL_GAP;
+    if (xi - prevX < gapToPrev || lastX - xi < MIN_LABEL_GAP * 1.5) continue;
+    kept.push(i);
+    prevX = xi;
+  }
+  if (!kept.includes(last)) kept.push(last);
+  return kept.map((i) => ({ x: x(i), label: props.data[i]?.label ?? "" }));
 });
 
 const reference = computed(() => {
@@ -126,7 +145,8 @@ const hover = computed(() => {
     y: y(d.value),
     label: d.label,
     value: fmt.value(d.value),
-    flip: hx > width.value - 150,
+    // flip to the left of the cursor near the right edge so the tooltip stays in view
+    flip: hx > width.value - 180,
   };
 });
 </script>

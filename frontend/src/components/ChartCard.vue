@@ -87,4 +87,25 @@ withDefaults(
   font-size: 13px;
   color: var(--danger);
 }
+
+/* phone ≤ 640px: actions wrap under the title instead of squeezing it, tighter body padding */
+@media (max-width: 640px) {
+  .chart-card-header {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 14px 12px 6px;
+  }
+  .titles {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .actions {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .chart-card-body {
+    padding: 4px 12px 12px;
+  }
+}
 </style>

@@ -95,4 +95,21 @@ defineProps<{
   color: var(--text-3);
   white-space: nowrap;
 }
+
+/* phone ≤ 640 px: "week of …" moves under the track instead of a fourth column */
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 18px 64px minmax(0, 1fr);
+    row-gap: 0;
+    column-gap: 10px;
+  }
+  .rank,
+  .plays {
+    grid-row: 1 / 3;
+  }
+  .when {
+    grid-column: 3;
+    margin-top: 1px;
+  }
+}
 </style>

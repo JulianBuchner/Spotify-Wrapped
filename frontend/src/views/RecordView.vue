@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import {
   getHistoryPoints,
   getRecordHighlights,
@@ -55,6 +55,28 @@ const TOP_N = 10;
 // ranks by streams, so the toggle makes the difference explicit.
 const rankMetric = ref<Metric>("playtime");
 const record = ref<InstanceType<typeof RecordChart> | null>(null);
+
+// Disc height: 560 on desktop/tablet, a square that fits the phone width below
+// ~600 px (RecordChart lays out from min(width, height), so the disc stays round).
+// Measured from the page element with a ResizeObserver (≈ viewport − 32 px gutter),
+// which also fires when no window resize event does (device emulation, zoom).
+const page = ref<HTMLDivElement | null>(null);
+const discHeight = ref(560);
+let pageRo: ResizeObserver | null = null;
+function updateDiscHeight(pageWidth: number) {
+  discHeight.value = Math.min(560, Math.max(320, Math.round(pageWidth) - 16));
+}
+onMounted(() => {
+  pageRo = new ResizeObserver((entries) => {
+    const w = entries[0]?.contentRect.width;
+    if (w) updateDiscHeight(w);
+  });
+  if (page.value) {
+    updateDiscHeight(page.value.clientWidth || window.innerWidth - 32);
+    pageRo.observe(page.value);
+  }
+});
+onBeforeUnmount(() => pageRo?.disconnect());
 
 // --- summary (title / subtitle numbers) ---
 const summary = ref<StatsSummary | null>(null);
@@ -319,7 +341,7 @@ const bucketNoun = computed(() => granularity.value);
 </script>
 
 <template>
-  <div class="record-page">
+  <div ref="page" class="record-page">
     <div class="filter-row">
       <DateRangeFilter v-model="window_" :busy="isFetching" />
       <PlaylistFilter v-model="playlist" :window="window_" />
@@ -367,7 +389,7 @@ const bucketNoun = computed(() => granularity.value);
           :error="pointsError"
           :empty="!points.length"
           skeleton="block"
-          :skeleton-height="560"
+          :skeleton-height="discHeight"
         >
           <template #actions>
             <span v-if="points.length" class="count-chip">{{ formatCompact(points.length) }} plays drawn</span>
@@ -402,7 +424,7 @@ const bucketNoun = computed(() => granularity.value);
             :points="points"
             :top-artists="topArtists"
             :highlights="highlights"
-            :height="560"
+            :height="discHeight"
           />
           <ul v-if="legendArtists.length" class="artist-legend" aria-label="Top artists">
             <li class="artist-item legend-note">{{ legendNote }} · scroll to zoom, drag to pan</li>
@@ -646,5 +668,48 @@ const bucketNoun = computed(() => granularity.value);
 .mini-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* tablet ≤ 1024 px: 5 KPI tiles become 3 columns; long tile values ("First play"
+   is a track name) get two lines, then an ellipsis */
+@media (max-width: 1024px) {
+  .kpi-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .kpi-row :deep(.stat-value) {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+}
+/* narrow ≤ 900 px: the side-by-side cards stack */
+@media (max-width: 900px) {
+  .span-7,
+  .span-5 {
+    grid-column: span 12;
+  }
+}
+/* phone ≤ 640 px */
+@media (max-width: 640px) {
+  .kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .grid {
+    gap: 12px;
+  }
+  .artist-legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
+  }
+  .mini-tab {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+  .btn {
+    min-height: 36px;
+  }
 }
 </style>

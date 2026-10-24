@@ -92,6 +92,7 @@ onMounted(async () => {
   align-items: flex-end;
   gap: 1px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .streams {
   font-size: 12.5px;
@@ -107,5 +108,12 @@ onMounted(async () => {
   padding: 16px 0;
   color: var(--text-3);
   font-size: 13px;
+}
+
+/* phone ≤ 640px: tighter rows */
+@media (max-width: 640px) {
+  .forgotten-row {
+    gap: 10px;
+  }
 }
 </style>

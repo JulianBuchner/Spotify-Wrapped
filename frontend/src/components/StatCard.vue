@@ -56,4 +56,17 @@ defineProps<{
   font-size: 12px;
   color: var(--text-3);
 }
+
+/* phone ≤ 640px: smaller tile padding and a 22px value (tiles sit two per row) */
+@media (max-width: 640px) {
+  .stat-card {
+    padding: 12px 14px;
+  }
+  .stat-value {
+    font-size: 22px;
+  }
+  .stat-skeleton {
+    height: calc(22px * 1.2);
+  }
+}
 </style>

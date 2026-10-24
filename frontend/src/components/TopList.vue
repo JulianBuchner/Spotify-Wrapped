@@ -239,6 +239,7 @@ const maxStreams = computed(() => Math.max(1, ...rows.value.map((r) => r.streams
   align-items: flex-end;
   gap: 1px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .streams {
   font-size: 13px;
@@ -254,5 +255,16 @@ const maxStreams = computed(() => Math.max(1, ...rows.value.map((r) => r.streams
   padding: 16px 0;
   color: var(--text-3);
   font-size: 13px;
+}
+
+/* phone ≤ 640px: touch-height tabs, tighter rows */
+@media (max-width: 640px) {
+  .mini-tab {
+    min-height: 36px;
+    padding: 4px 12px;
+  }
+  .top-row {
+    gap: 10px;
+  }
 }
 </style>

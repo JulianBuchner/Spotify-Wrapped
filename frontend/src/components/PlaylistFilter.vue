@@ -69,4 +69,17 @@ function label(p: PlaylistInfo) {
   max-width: 240px;
   text-overflow: ellipsis;
 }
+
+/* phone ≤ 640px: the dropdown takes the full row */
+@media (max-width: 640px) {
+  .playlist-filter {
+    display: flex;
+    width: 100%;
+  }
+  .select {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+}
 </style>

@@ -52,6 +52,21 @@ const yMax = computed(() => Math.max(maxValue.value, ticks.value[ticks.value.len
 const band = computed(() => plotW.value / Math.max(1, props.data.length));
 const barW = computed(() => Math.min(MAX_BAR, Math.max(2, band.value - GAP * 2)));
 
+/**
+ * `labelEvery` is a minimum: when the bands get narrower than the widest label
+ * (≈ 6px per character at 11px + a 6px gap) the stride grows in multiples of
+ * `labelEvery` so labels never overlap on narrow charts.
+ */
+const CHAR_PX = 6;
+const LABEL_GAP = 6;
+const labelStride = computed(() => {
+  const every = Math.max(1, props.labelEvery);
+  const widest = Math.max(1, ...props.data.map((d) => d.label.length));
+  const minPx = widest * CHAR_PX + LABEL_GAP;
+  const perLabel = band.value * every;
+  return every * Math.max(1, Math.ceil(minPx / Math.max(1, perLabel)));
+});
+
 function xCenter(i: number) {
   return M.left + band.value * (i + 0.5);
 }
@@ -91,7 +106,8 @@ const hover = computed(() => {
     y: y(d.value),
     label: d.tooltipLabel ?? d.label,
     value: fmt.value(d.value),
-    flip: hx > width.value - 140,
+    // flip to the left of the cursor near the right edge so the tooltip stays in view
+    flip: hx > width.value - 180,
   };
 });
 </script>
@@ -124,7 +140,7 @@ const hover = computed(() => {
       <g>
         <template v-for="(d, i) in data" :key="'l' + i">
           <text
-            v-if="i % labelEvery === 0"
+            v-if="i % labelStride === 0"
             :x="xCenter(i)"
             :y="height - 8"
             class="tick-label"

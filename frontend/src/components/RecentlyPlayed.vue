@@ -123,10 +123,21 @@ onBeforeUnmount(() => window.clearInterval(timer));
   font-size: 12px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .empty {
   padding: 16px 0;
   color: var(--text-3);
   font-size: 13px;
+}
+
+/* phone ≤ 640px: shorter playlist chip so the title keeps most of the row */
+@media (max-width: 640px) {
+  .recent-row {
+    gap: 10px;
+  }
+  .playlist-chip {
+    max-width: 96px;
+  }
 }
 </style>

@@ -1,14 +1,29 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { useTheme } from "./theme";
 import { getPlayCount } from "./api";
 import { formatNumber } from "./lib/format";
 
 const { theme, toggleTheme } = useTheme();
+const route = useRoute();
 
 const playCount = ref<number | null>(null);
 
+// On narrow screens the tabs are a horizontally scrollable strip: keep the
+// active tab in view (centered when possible) without scrolling the page.
+const tabsEl = ref<HTMLElement | null>(null);
+function revealActiveTab() {
+  const nav = tabsEl.value;
+  const active = nav?.querySelector<HTMLElement>(".tab-active");
+  if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
+  const target = active.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2;
+  nav.scrollLeft = Math.max(0, Math.min(target, nav.scrollWidth - nav.clientWidth));
+}
+
 onMounted(async () => {
+  await nextTick();
+  revealActiveTab();
   try {
     const res = await getPlayCount();
     playCount.value = res.count;
@@ -16,6 +31,13 @@ onMounted(async () => {
     playCount.value = null;
   }
 });
+watch(
+  () => route.path,
+  async () => {
+    await nextTick();
+    revealActiveTab();
+  }
+);
 </script>
 
 <template>
@@ -33,7 +55,7 @@ onMounted(async () => {
       <span class="brand-name">Anytime Wrapped</span>
     </div>
 
-    <nav class="tabs" aria-label="Main navigation">
+    <nav ref="tabsEl" class="tabs hscroll" aria-label="Main navigation">
       <RouterLink to="/" class="tab" exact-active-class="tab-active">Dashboard</RouterLink>
       <RouterLink to="/cloud" class="tab" active-class="tab-active">Listening Cloud</RouterLink>
       <RouterLink to="/record" class="tab" active-class="tab-active">Record</RouterLink>
@@ -181,6 +203,53 @@ onMounted(async () => {
 .app-main {
   flex: 1;
   width: 100%;
+  min-width: 0;
   padding: 24px 28px 40px;
+}
+
+/* tablet ≤ 1024px: tighter header + page gutter (breakpoints: 640 phone, 900 narrow, 1024 tablet) */
+@media (max-width: 1024px) {
+  .app-header {
+    gap: 20px;
+    padding: 0 20px;
+  }
+  .tab {
+    padding: 0 12px;
+  }
+  .app-main {
+    padding: 20px 20px 36px;
+  }
+}
+
+/* narrow ≤ 900px: brand + chip + toggle on row 1, the tabs as a full-width strip on row 2 */
+@media (max-width: 900px) {
+  .app-header {
+    flex-wrap: wrap;
+    height: auto;
+    gap: 0 12px;
+    padding: 0 16px;
+  }
+  .brand {
+    height: 50px;
+  }
+  .header-right {
+    height: 50px;
+  }
+  .tabs {
+    order: 3;
+    flex: 0 0 calc(100% + 32px);
+    height: 40px;
+    gap: 0;
+    margin: 0 -16px;
+    padding: 0 8px;
+  }
+  .tab {
+    flex-shrink: 0;
+    padding: 0 12px;
+    min-height: 40px;
+  }
+  .app-main {
+    padding: 16px 16px 32px;
+  }
 }
 </style>
