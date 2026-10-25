@@ -22,6 +22,9 @@ import genresRoutes from "./routes/genres";
 dotenv.config();
 
 const PORT = Number(process.env.PORT ?? "3000");
+// Bind address. "0.0.0.0" = reachable LAN-wide; set HOST=127.0.0.1 behind the
+// Home-Dashboard hub so :3000 is only reachable from the Pi itself.
+const HOST = process.env.HOST ?? "0.0.0.0";
 const POLL_MIN = Number(process.env.POLL_INTERVAL_MINUTES ?? "30");
 const POLL_SECONDS = Number(process.env.POLL_INTERVAL_SECONDS ?? "15");
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? "*";
@@ -230,8 +233,8 @@ async function main() {
 
   await applySqlitePragmas();
 
-  await app.listen({ port: PORT, host: "0.0.0.0" });
-  console.log(`Backend listening on http://0.0.0.0:${PORT}`);
+  await app.listen({ port: PORT, host: HOST });
+  console.log(`Backend listening on http://${HOST}:${PORT}`);
 
   // poll once on startup
   pollAllUsersOnce().catch((err) => app.log.error(err));

@@ -141,10 +141,25 @@ with `[]`). So the catalog fetches it once and **stores** it; nothing reads genr
 
 The server also hosts the built dashboard: if `../frontend/dist` exists, it is
 served under `/Spotify-Wrapped/` (matching the Vite base path) with an SPA
-fallback for deep links, and `/` redirects there. On the Pi that makes the
-whole app available LAN-wide at `http://julian-pi.fritz.box:3000/Spotify-Wrapped/`
-— same origin, so no CORS involved. Without a `dist` folder the server just
-logs a warning and serves the API only.
+fallback for deep links, and `/` redirects there. Same origin, so no CORS
+involved. Without a `dist` folder the server just logs a warning and serves
+the API only.
+
+### Behind the Home-Dashboard hub
+
+On the Pi the app is reached through the Home-Dashboard hub (port 22110), which
+handles the login and forwards `/Spotify-Wrapped/*` to this server. The hub
+rewrites `/Spotify-Wrapped/api/*` to `/api/*`, so the production frontend is
+built with `VITE_API_BASE_URL="/Spotify-Wrapped"` (`frontend/.env.production`);
+the backend routes stay at `/api/*`.
+
+The bind address is configurable via `HOST` (default `0.0.0.0`, LAN-wide).
+Once the hub runs, set `HOST=127.0.0.1` in the Pi's `.env` and restart: port
+3000 is then only reachable from the Pi itself (`curl http://127.0.0.1:3000/health`
+still works there), and the app is reached only through the hub at
+`http://<pi>:22110/Spotify-Wrapped/`. The direct address
+`http://julian-pi.fritz.box:3000/Spotify-Wrapped/` stops working — by design,
+so nobody in the LAN can bypass the hub login.
 
 ## Deployment (Raspberry Pi + pm2)
 
@@ -160,5 +175,8 @@ npm run build
 (cd ../frontend && npm ci && npm run build)   # if the frontend changed
 pm2 restart Spotify-Wrapped-backend
 ```
+
+Behind the hub, `.env` on the Pi also contains `HOST=127.0.0.1` (see above);
+pm2 picks it up on restart because the server loads `.env` itself.
 
 The SQLite file (`dev.db`) is the single source of truth — snapshot it with `sqlite3 dev.db ".backup out.db"` (never plain-copy while the app is writing).
