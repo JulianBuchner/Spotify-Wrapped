@@ -19,7 +19,7 @@ import { parseLimit, parseOffset, likeCondition, num, playlistCondition } from "
 // ---------------------------------------------------------------------------
 
 const POINTS_TTL_MS = 300_000;
-const POINTS_MAX_ENTRIES = 3; // ~12MB json + ~2.5MB gz each — keep few
+const POINTS_MAX_ENTRIES = 12; // ~12MB json + ~2.5MB gz each: ≈180MB worst case, fine on the M3's 16GB
 const pointsCache = new Map<string, { json: string; gz: Buffer; at: number }>();
 
 const historyRoutes: FastifyPluginAsync = async (app) => {
