@@ -147,36 +147,40 @@ the API only.
 
 ### Behind the Home-Dashboard hub
 
-On the Pi the app is reached through the Home-Dashboard hub (port 22110), which
+On the home server (M3) the app is reached through the Home-Dashboard hub (port 22110), which
 handles the login and forwards `/Spotify-Wrapped/*` to this server. The hub
 rewrites `/Spotify-Wrapped/api/*` to `/api/*`, so the production frontend is
 built with `VITE_API_BASE_URL="/Spotify-Wrapped"` (`frontend/.env.production`);
 the backend routes stay at `/api/*`.
 
 The bind address is configurable via `HOST` (default `0.0.0.0`, LAN-wide).
-Once the hub runs, set `HOST=127.0.0.1` in the Pi's `.env` and restart: port
-3000 is then only reachable from the Pi itself (`curl http://127.0.0.1:3000/health`
-still works there), and the app is reached only through the hub at
-`http://<pi>:22110/Spotify-Wrapped/`. The direct address
-`http://julian-pi.fritz.box:3000/Spotify-Wrapped/` stops working — by design,
-so nobody in the LAN can bypass the hub login.
+On the server `.env` sets `HOST=127.0.0.1`: port 3000 is then only reachable
+from the server itself (`curl http://127.0.0.1:3000/health` still works there),
+and the app is reached only through the hub — by design, so nobody in the LAN
+can bypass the hub login.
 
-## Deployment (Raspberry Pi + pm2)
+## Deployment (M3, systemd user unit)
 
-pm2 runs the **compiled** server, so a change is live only after build + restart:
+Since 2026-11-22 the backend runs on the M3 as the systemd user unit
+`spotify-wrapped` (before: Raspberry Pi with pm2). Deploy from the PC with the
+hub repo's script, which builds backend and frontend here and runs `npm ci`,
+`prisma generate` and `prisma migrate deploy` on the M3:
 
 ```bash
-pm2 stop Spotify-Wrapped-backend
-git pull
-npm install                  # if dependencies changed
-npx prisma migrate deploy    # if there are new migrations
-npx prisma generate          # required after any schema change (stale client → TS2353 on build)
-npm run build
-(cd ../frontend && npm ci && npm run build)   # if the frontend changed
-pm2 restart Spotify-Wrapped-backend
+cd /d/Coding/Home-Dashboard && deploy/deploy.sh spotify
 ```
 
-Behind the hub, `.env` on the Pi also contains `HOST=127.0.0.1` (see above);
-pm2 picks it up on restart because the server loads `.env` itself.
+Layout on the M3 (details: `Home-Dashboard/docs/m3-setup.md`):
 
-The SQLite file (`dev.db`) is the single source of truth — snapshot it with `sqlite3 dev.db ".backup out.db"` (never plain-copy while the app is writing).
+- code in `/srv/apps/Spotify-Wrapped` (`backend/`, `frontend/dist`), settings in
+  `/srv/apps/Spotify-Wrapped/.env`; `backend/.env` is a symlink to it
+- database `/srv/data/Spotify-Wrapped/spotify-wrapped.db`
+  (`DATABASE_URL="file:/srv/data/Spotify-Wrapped/spotify-wrapped.db"`)
+- `systemctl --user status|restart spotify-wrapped`, `journalctl --user -u spotify-wrapped -n 50`
+- nightly backup at 03:15 by `/srv/ops/backup.sh`, pulled to the Pi at 04:00
+
+`better-sqlite3` is pinned to 13 (with an `overrides` entry, since the Prisma
+adapter still asks for 12): version 13 ships prebuilt N-API binaries, so the M3
+(Node 26, no compiler installed) needs no build tools.
+
+The SQLite file is the single source of truth — snapshot it with `sqlite3 <db> ".backup out.db"` (never plain-copy while the app is writing).
