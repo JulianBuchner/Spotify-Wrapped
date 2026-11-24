@@ -12,6 +12,7 @@ import {
 import { ARTIST_OVERRIDES, BROAD_GROUPS, GENRE_GROUPS, groupForArtist } from "./data/genreGroups";
 import { num } from "./lib/query";
 import { whereClause } from "./lib/dateFilter";
+import { bumpDataVersion } from "./lib/dataVersion";
 
 // ---------------------------------------------------------------------------
 // Catalog enrichment: fills the Track and Artist tables from Spotify for every
@@ -100,6 +101,7 @@ async function upsertTracks(tracks: SpotifyTrackMeta[]) {
       });
     })
   );
+  bumpDataVersion(); // genre views read Track/Artist (no-op in the CLI process)
 }
 
 /**
@@ -122,6 +124,7 @@ async function insertUnresolvedTracks(ids: string[]) {
       })
     )
   );
+  bumpDataVersion();
 }
 
 async function upsertArtists(
@@ -146,6 +149,7 @@ async function upsertArtists(
       });
     })
   );
+  bumpDataVersion();
 }
 
 /**
@@ -168,6 +172,7 @@ async function insertUnresolvedArtists(ids: string[]) {
       })
     )
   );
+  bumpDataVersion();
 }
 
 /**
@@ -198,6 +203,7 @@ export async function assignGroups(all = false): Promise<{ assigned: number; upd
     await prisma.$transaction(
       part.map((u) => prisma.artist.update({ where: { spotifyId: u.id }, data: { group: u.group } }))
     );
+    bumpDataVersion();
   }
   return { assigned, updated: updates.length };
 }

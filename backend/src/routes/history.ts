@@ -9,18 +9,29 @@ import {
   whereClause,
 } from "../lib/dateFilter";
 import { parseLimit, parseOffset, likeCondition, num, playlistCondition } from "../lib/query";
+import {
+  ALL_TIME_RANGE,
+  cacheEntryValid,
+  dataVersion,
+  prewarmReason,
+  probeExternalWrites,
+  type CacheStamp,
+} from "../lib/dataVersion";
 
 // ---------------------------------------------------------------------------
 // /api/history/points serves ~190k rows. Going through Prisma materializes
 // every row as an object (seconds on the Pi), so this endpoint reads via the
 // shared read-only better-sqlite3 connection (lib/rawDb) in raw-array mode
 // instead, and caches the final gzipped payload — the gzip alone costs >1s
-// per hit.
+// per hit. All-time entries also stay valid past the TTL while the data
+// version is unchanged (lib/dataVersion.ts), same as the response cache.
 // ---------------------------------------------------------------------------
 
 const POINTS_TTL_MS = 300_000;
 const POINTS_MAX_ENTRIES = 12; // ~12MB json + ~2.5MB gz each: ≈180MB worst case, fine on the M3's 16GB
-const pointsCache = new Map<string, { json: string; gz: Buffer; at: number }>();
+const pointsCache = new Map<string, { json: string; gz: Buffer } & CacheStamp>();
+const pointsValid = (key: string, entry: CacheStamp, now = Date.now()) =>
+  cacheEntryValid(entry, POINTS_TTL_MS, ALL_TIME_RANGE.test(key), now);
 
 const historyRoutes: FastifyPluginAsync = async (app) => {
   // Paginated raw play log, newest first, searchable across track/artist/album.
@@ -82,7 +93,7 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
       if (acceptsGzip) return reply.header("content-encoding", "gzip").send(entry.gz);
       return reply.send(entry.json);
     };
-    if (cached && Date.now() - cached.at < POINTS_TTL_MS) {
+    if (cached && pointsValid(cacheKey, cached)) {
       reply.header("x-cache", "hit");
       return sendCached(cached);
     }
@@ -94,18 +105,25 @@ const historyRoutes: FastifyPluginAsync = async (app) => {
   // Pre-warm the all-time window on boot and keep it fresh — the cold build
   // costs ~10s on the Pi (SD read + stringify + gzip of 10MB). CloudView now
   // defaults to this_week (cheap, built lazily), but all-time stays one click
-  // away and must not take 10s when clicked.
+  // away and must not take 10s when clicked. A run only rebuilds when the entry
+  // is missing, the data changed since its build, or it nears the safety cap.
   const PREWARM_URL = "/api/history/points?range=all_time";
-  const prewarm = () => {
+  const PREWARM_INTERVAL_MS = 4 * 60_000;
+  const prewarm = async () => {
     try {
+      await probeExternalWrites();
+      const started = Date.now();
+      const reason = prewarmReason(pointsCache.get(PREWARM_URL), PREWARM_INTERVAL_MS, started);
+      if (!reason) return; // data unchanged: the cached entry stays valid
       const { from, to } = buildPlayedAtFilter({ range: "all_time" });
       buildPointsPayload(PREWARM_URL, from, to, "");
+      app.log.info({ ms: Date.now() - started, reason }, "points prewarm done");
     } catch (err) {
       app.log.warn({ err }, "points prewarm failed");
     }
   };
-  setTimeout(prewarm, 5_000).unref();
-  setInterval(prewarm, 4 * 60_000).unref();
+  setTimeout(() => void prewarm(), 5_000).unref();
+  setInterval(() => void prewarm(), PREWARM_INTERVAL_MS).unref();
 };
 
 /** Query (raw sqlite), serialize, gzip and cache one points window. */
@@ -115,6 +133,7 @@ function buildPointsPayload(
   to: Date | undefined,
   playlist: string
 ): { json: string; gz: Buffer } {
+  const version = dataVersion(); // before the read (see server.ts versionAtStart)
   // plain SQL — this path bypasses Prisma (see header comment)
   const conds: string[] = [];
   const params: unknown[] = [];
@@ -169,11 +188,20 @@ function buildPointsPayload(
     meta: { total: n, capped: n === CAP },
   });
   const gz = gzipSync(json, { level: 3 });
-  if (pointsCache.size >= POINTS_MAX_ENTRIES) {
-    const oldest = pointsCache.keys().next().value;
-    if (oldest !== undefined) pointsCache.delete(oldest);
+  const now = Date.now();
+  if (!pointsCache.has(cacheKey) && pointsCache.size >= POINTS_MAX_ENTRIES) {
+    // an expired entry first, the oldest otherwise (keeps the long-lived all-time entry)
+    let victim: string | undefined;
+    for (const [k, e] of pointsCache) {
+      if (!pointsValid(k, e, now)) {
+        victim = k;
+        break;
+      }
+    }
+    victim ??= pointsCache.keys().next().value;
+    if (victim !== undefined) pointsCache.delete(victim);
   }
-  pointsCache.set(cacheKey, { json, gz, at: Date.now() });
+  pointsCache.set(cacheKey, { json, gz, at: now, version });
   return { json, gz };
 }
 

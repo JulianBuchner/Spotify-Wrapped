@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { pendingTrackIds } from "./catalog";
+import { bumpDataVersion } from "./lib/dataVersion";
 import {
   ensureAccessToken,
   fetchCurrentlyPlaying,
@@ -68,10 +69,12 @@ function listenedMs(progressMs: number, trackDurationMs: number, final: boolean)
 async function recordProgress(playId: string, progressMs: number, trackDurationMs: number, final: boolean) {
   const ms = listenedMs(progressMs, trackDurationMs, final);
   try {
-    await prisma.play.updateMany({
+    const res = await prisma.play.updateMany({
       where: { id: playId, durationMs: { lt: ms } },
       data: { durationMs: ms },
     });
+    // Only a real change counts: while idle this runs every poll and matches nothing.
+    if (res.count > 0) bumpDataVersion();
   } catch (err) {
     console.error(`[poller] Failed to update listened time for play ${playId}`, err);
   }
@@ -217,6 +220,7 @@ async function pollOneAccount(accountId: string) {
     },
     select: { id: true },
   });
+  bumpDataVersion(); // response caches: the all-time views changed
 
   // Later polls of this track extend the row's listened time. Only if we are still on it:
   // the entry may already belong to the next track if the DB work took a while.

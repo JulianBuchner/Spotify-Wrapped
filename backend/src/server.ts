@@ -4,12 +4,21 @@ import compress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
 import path from "path";
 import fs from "fs";
+import { randomBytes } from "crypto";
 import dotenv from "dotenv";
 import { Prisma } from "@prisma/client";
 import { pollAllUsersOnce } from "./poller";
 import { runEnrichment } from "./catalog";
 import { prisma, applySqlitePragmas } from "./db";
 import { buildPlayedAtFilter } from "./lib/dateFilter";
+import {
+  ALL_TIME_RANGE,
+  cacheEntryValid,
+  dataVersion,
+  prewarmReason,
+  probeExternalWrites,
+  type CacheStamp,
+} from "./lib/dataVersion";
 import searchRoutes from "./routes/search";
 import overviewRoutes from "./routes/overview";
 import statsRoutes from "./routes/stats";
@@ -49,6 +58,10 @@ async function main() {
   // record/*, genres/* and wrapped/* over those windows stay fresh for 15 min
   // and the story pages' all-time defaults are prewarmed below; short windows
   // keep the 60 s TTL.
+  // The all-time entries of those long-TTL paths also stay valid past the TTL
+  // (up to CACHE_MAX_AGE_MS) as long as the data version has not changed — see
+  // lib/dataVersion.ts — so the prewarm only rebuilds after a write. ytd and
+  // last_year move with the clock, so they keep the plain TTL.
   // NOTE: these hooks must be registered BEFORE @fastify/compress — onSend
   // hooks run in registration order, and the cache needs the uncompressed
   // JSON string (compression then still applies to cache hits and misses).
@@ -62,7 +75,16 @@ async function main() {
   const LONG_TTL_RANGE = /(^|[?&])range=(all_time|ytd|last_year)(&|$)/;
   const ttlFor = (key: string) =>
     LONG_TTL_PATH.test(key) && LONG_TTL_RANGE.test(key) ? CACHE_LONG_TTL_MS : CACHE_TTL_MS;
-  const responseCache = new Map<string, { body: string; at: number }>();
+  const versioned = (key: string) => LONG_TTL_PATH.test(key) && ALL_TIME_RANGE.test(key);
+  const entryValid = (key: string, entry: CacheStamp, now = Date.now()) =>
+    cacheEntryValid(entry, ttlFor(key), versioned(key), now);
+  const responseCache = new Map<string, { body: string } & CacheStamp>();
+  // dataVersion() at the start of each cacheable miss, stored with its response
+  const versionAtStart = new WeakMap<object, number>();
+  // Lets the view prewarm (app.inject) skip a still-valid entry and rebuild it;
+  // per-boot random, so a request through the hub cannot force rebuilds.
+  const PREWARM_HEADER = "x-prewarm-token";
+  const PREWARM_TOKEN = randomBytes(16).toString("hex");
 
   /**
    * Cache key = path + query with the params sorted and empty ones dropped, so
@@ -81,11 +103,16 @@ async function main() {
     if (request.method !== "GET") return;
     const key = cacheKey(request.raw.url ?? "");
     if (!CACHEABLE.test(key)) return;
-    const hit = responseCache.get(key);
-    if (hit && Date.now() - hit.at < ttlFor(key)) {
-      reply.header("x-cache", "hit").type("application/json");
-      return reply.send(hit.body);
+    if (request.headers[PREWARM_HEADER] !== PREWARM_TOKEN) {
+      const hit = responseCache.get(key);
+      // A hit kept valid by the data version does not refresh `at`: the cap stays absolute.
+      if (hit && entryValid(key, hit)) {
+        reply.header("x-cache", "hit").type("application/json");
+        return reply.send(hit.body);
+      }
     }
+    // Snapshot before the handler reads: a write during the build makes the entry outdated.
+    versionAtStart.set(request, dataVersion());
   });
 
   app.addHook("onSend", async (request, reply, payload) => {
@@ -97,11 +124,23 @@ async function main() {
     ) {
       const key = cacheKey(request.raw.url ?? "");
       if (CACHEABLE.test(key)) {
-        if (responseCache.size >= CACHE_MAX_ENTRIES) {
-          const oldest = responseCache.keys().next().value;
-          if (oldest !== undefined) responseCache.delete(oldest);
+        const now = Date.now();
+        if (!responseCache.has(key) && responseCache.size >= CACHE_MAX_ENTRIES) {
+          // Evict an expired entry first, the oldest otherwise: the prewarmed all-time
+          // entries are no longer re-stored while the data is unchanged and must not
+          // be pushed out by expired short-TTL ones.
+          let victim: string | undefined;
+          for (const [k, e] of responseCache) {
+            if (!entryValid(k, e, now)) {
+              victim = k;
+              break;
+            }
+          }
+          victim ??= responseCache.keys().next().value;
+          if (victim !== undefined) responseCache.delete(victim);
         }
-        responseCache.set(key, { body: payload, at: Date.now() });
+        // no snapshot (should not happen) = -1 = "changed long ago": plain TTL only
+        responseCache.set(key, { body: payload, at: now, version: versionAtStart.get(request) ?? -1 });
       }
     }
     return payload;
@@ -252,11 +291,21 @@ async function main() {
   setTimeout(() => void runEnrichment("full"), ENRICH_BOOT_DELAY_MS);
   setInterval(() => void runEnrichment("pending"), ENRICH_INTERVAL_MS);
 
+  // Writes by other processes (CLI scripts) reach the response caches through this
+  // cheap probe (PRAGMA data_version); in-process writes bump the version directly.
+  const DATA_PROBE_INTERVAL_MS = 30_000;
+  void probeExternalWrites(); // baseline
+  setInterval(() => void probeExternalWrites(), DATA_PROBE_INTERVAL_MS);
+
   // Prewarm the default all-time views of Record, Eras and Genres — exactly the
   // requests those pages make on load — through the app itself, 20 s after boot
   // and then every 14 min (just under the long cache TTL), so the first visit
-  // never waits 10–20 s on the Pi. Sequential with a short gap so the poller and
-  // real requests keep getting the event loop; a failure only logs.
+  // never waits 10–20 s on the Pi. A run rebuilds only entries that are missing,
+  // outdated (data version changed since their build) or close to the safety cap;
+  // with no writes in between (nobody listening) it does nothing. Rebuilds bypass
+  // the still-valid old entry, which keeps answering visitors meanwhile.
+  // Sequential with a short gap so the poller and real requests keep getting the
+  // event loop; a failure only logs.
   const PREWARM_VIEW_URLS = [
     // Record
     "/api/stats/summary?range=all_time",
@@ -286,16 +335,33 @@ async function main() {
     prewarming = true;
     const started = Date.now();
     try {
+      await probeExternalWrites();
+      const todo: string[] = [];
+      const reasons = new Set<string>();
       for (const url of PREWARM_VIEW_URLS) {
+        const reason = prewarmReason(responseCache.get(cacheKey(url)), PREWARM_INTERVAL_MS, started);
+        if (reason) {
+          todo.push(url);
+          reasons.add(reason);
+        }
+      }
+      if (todo.length === 0) {
+        app.log.info({ urls: PREWARM_VIEW_URLS.length }, "view prewarm skipped (data unchanged)");
+        return;
+      }
+      for (const url of todo) {
         try {
-          const res = await app.inject({ method: "GET", url });
+          const res = await app.inject({ method: "GET", url, headers: { [PREWARM_HEADER]: PREWARM_TOKEN } });
           if (res.statusCode !== 200) app.log.warn({ url, status: res.statusCode }, "view prewarm: non-200");
         } catch (err) {
           app.log.warn({ err, url }, "view prewarm failed");
         }
         await new Promise((r) => setTimeout(r, 300));
       }
-      app.log.info({ ms: Date.now() - started, urls: PREWARM_VIEW_URLS.length }, "view prewarm done");
+      app.log.info(
+        { ms: Date.now() - started, urls: PREWARM_VIEW_URLS.length, rebuilt: todo.length, reason: [...reasons].join(",") },
+        "view prewarm done"
+      );
     } finally {
       prewarming = false;
     }
