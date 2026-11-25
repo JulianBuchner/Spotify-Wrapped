@@ -14,7 +14,7 @@ Spotify Web API ──(poll every 15s)──► Fastify backend ──► SQLite
                               Vue 3 dashboard (this repo, /frontend)
 ```
 
-- The **poller** calls Spotify's `currently-playing` endpoint, deduplicates repeats/jitter, and stores one row per play: track, artist, album, timestamp, duration — plus the **playback context** (which playlist/album/artist it was played from, with the playlist name resolved via a second API call).
+- The **poller** calls Spotify's `currently-playing` endpoint, deduplicates polling jitter (while repeat-one loops and restarts count as new plays), and stores one row per play: track, artist, album, timestamp, duration — plus the **playback context** (which playlist/album/artist it was played from, with the playlist name resolved via a second API call).
 - The **API** aggregates that play log into summaries, time series, top lists, "wrapped"-style fun facts, search, and per-song/artist/album detail.
 - The **dashboard** shows it all with a date-range filter, playlist filter, dark/light mode, and a pannable/zoomable canvas visualization of every play (x = date, y = time of day).
 

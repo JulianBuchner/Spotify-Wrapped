@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { pendingTrackIds } from "./catalog";
 import { bumpDataVersion } from "./lib/dataVersion";
+import { reachedBeforeRestartMs, startedOver } from "./lib/playRestart";
 import {
   ensureAccessToken,
   fetchCurrentlyPlaying,
@@ -10,6 +11,8 @@ import {
 
 // In-memory dedupe so we don't hit the DB every 15s for the same track. `playId` is the row
 // the current play is written to, so its listened time can grow with every poll.
+// `lastPolledAt` (local clock) is the last poll of this account, playing or not, and
+// `lastPollPlaying` whether that poll saw the track playing.
 const lastSeenByAccount = new Map<
   string,
   {
@@ -17,6 +20,8 @@ const lastSeenByAccount = new Map<
     startMs: bigint;
     lastProgressMs: number | null;
     lastTimestampMs: number;
+    lastPolledAt: number;
+    lastPollPlaying: boolean;
     playId: string | null;
     trackDurationMs: number;
   }
@@ -104,14 +109,19 @@ async function pollOneAccount(accountId: string) {
   const accessToken = await ensureAccessToken(account);
 
   const playing = await fetchCurrentlyPlaying(accessToken);
+  const now = Date.now();
   const prev = lastSeenByAccount.get(accountId);
 
   if (!playing || !playing.isPlaying || playing.type !== "track" || !playing.item?.uri) {
     // Nothing (or something that isn't a track) playing. The play we were following may have
     // run to its end since the last poll, so let it count as complete if it got close enough.
-    // The entry stays: a paused track that resumes keeps writing to the same row.
-    if (prev?.playId && prev.lastProgressMs !== null) {
-      await recordProgress(prev.playId, prev.lastProgressMs, prev.trackDurationMs, true);
+    // The entry stays: a paused track that resumes keeps writing to the same row. The poll
+    // time moves on, so a pause never looks like playing time to the restart check.
+    if (prev) {
+      lastSeenByAccount.set(accountId, { ...prev, lastPolledAt: now, lastPollPlaying: false });
+      if (prev.playId && prev.lastProgressMs !== null) {
+        await recordProgress(prev.playId, prev.lastProgressMs, prev.trackDurationMs, true);
+      }
     }
     return;
   }
@@ -120,45 +130,53 @@ async function pollOneAccount(accountId: string) {
 
   const progressMs = playing.progressMs ?? null;
   const timestampMs = playing.timestampMs;
-  const startMs = BigInt(timestampMs - (progressMs ?? 0)); // estimated track start time (ms epoch)
+  // Estimated track start time (ms epoch), from the local clock: Spotify's `timestamp` is the
+  // last playback state change, not the fetch time (and may not move on a repeat-one loop).
+  const startMs = BigInt(now - (progressMs ?? 0));
 
-  // If we're still on the same track, rely on progress to detect restarts and avoid
-  // duplicates caused by timestamp/progress jitter.
+  // Where the previous play ended, for its final listened time.
+  let prevEndMs = prev?.lastProgressMs ?? null;
+  // The same track started over while we were watching: the previous row is a different play.
+  let restarted = false;
+
+  // If we're still on the same track, rely on progress to detect restarts (repeat-one loops,
+  // "previous") and avoid duplicates caused by timestamp/progress jitter.
   if (prev && prev.uri === track.uri) {
     if (progressMs === null) {
-      lastSeenByAccount.set(accountId, { ...prev, lastTimestampMs: timestampMs });
+      lastSeenByAccount.set(accountId, {
+        ...prev,
+        lastTimestampMs: timestampMs,
+        lastPolledAt: now,
+        lastPollPlaying: true,
+      });
       return;
     }
 
     const prevProgress = prev.lastProgressMs;
-    if (prevProgress !== null) {
-      const progressedForward = progressMs + 2000 >= prevProgress;
-      const looksLikeRestart = progressMs < 10_000 && prevProgress > 30_000;
-      if (progressedForward || !looksLikeRestart) {
-        lastSeenByAccount.set(accountId, {
-          ...prev,
-          lastProgressMs: progressMs,
-          lastTimestampMs: timestampMs,
-        });
-        if (prev.playId && progressMs > prevProgress) {
-          await recordProgress(prev.playId, progressMs, prev.trackDurationMs, false);
-        }
-        return;
-      }
-    } else {
+    const msSinceLastPoll = now - prev.lastPolledAt;
+    if (prevProgress === null || !startedOver(prevProgress, progressMs, msSinceLastPoll, prev.trackDurationMs)) {
       lastSeenByAccount.set(accountId, {
         ...prev,
         lastProgressMs: progressMs,
         lastTimestampMs: timestampMs,
+        lastPolledAt: now,
+        lastPollPlaying: true,
       });
-      if (prev.playId) await recordProgress(prev.playId, progressMs, prev.trackDurationMs, false);
+      if (prev.playId && (prevProgress === null || progressMs > prevProgress)) {
+        await recordProgress(prev.playId, progressMs, prev.trackDurationMs, false);
+      }
       return;
     }
+
+    // Started over: the previous run got further than its last poll showed, unless that poll
+    // found it paused (no playing time to add then).
+    restarted = true;
+    if (prev.lastPollPlaying) prevEndMs = reachedBeforeRestartMs(prevProgress, progressMs, msSinceLastPoll);
   }
 
   // A different track, or the same one started over: the previous play is over.
-  if (prev?.playId && prev.lastProgressMs !== null) {
-    await recordProgress(prev.playId, prev.lastProgressMs, prev.trackDurationMs, true);
+  if (prev?.playId && prevEndMs !== null) {
+    await recordProgress(prev.playId, prevEndMs, prev.trackDurationMs, true);
   }
 
   // Update in-memory "last seen" immediately (so we don't reprocess during DB work)
@@ -168,24 +186,29 @@ async function pollOneAccount(accountId: string) {
     startMs,
     lastProgressMs: progressMs,
     lastTimestampMs: timestampMs,
+    lastPolledAt: now,
+    lastPollPlaying: true,
     playId: null,
     trackDurationMs,
   });
 
-  // Prevent duplicates across restarts:
-  // check whether we already have this URI inserted around that start time (+/- 60s)
-  const window = 60_000n;
+  // Prevent duplicates across process restarts: check whether we already have this URI inserted
+  // around that start time (+/- 60s, at most half the track). Skipped after a restart we saw
+  // ourselves, which may begin less than 60 s after the play it ends ("previous" at 0:40).
+  const window = BigInt(Math.min(60_000, Math.floor(trackDurationMs / 2)));
   const startLower = new Date(Number(startMs - window));
   const startUpper = new Date(Number(startMs + window));
 
-  const existing = await prisma.play.findFirst({
-    where: {
-      userId: account.userId,
-      spotifyUri: track.uri,
-      playedAt: { gte: startLower, lte: startUpper },
-    },
-    select: { id: true },
-  });
+  const existing = restarted
+    ? null
+    : await prisma.play.findFirst({
+        where: {
+          userId: account.userId,
+          spotifyUri: track.uri,
+          playedAt: { gte: startLower, lte: startUpper },
+        },
+        select: { id: true },
+      });
 
   if (existing) {
     // Recorded before a process restart: keep extending that row's listened time.
